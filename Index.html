@@ -637,12 +637,21 @@ function pflanzeDetail(id){
   sheet('🌿 '+esc(p.name), html);
   ladeTagebuch(id);
 }
+// Zwischenspeicher für große Fotos (bleibt, solange die App offen ist)
+const BILDER = {};
+function titelfotoLaden(id){
+  const hero = $('pfHero'); if(!hero) return;
+  const p = S.d.pflanzen.find(x=>x.id===id) || {};
+  const k = id + ':' + (p.thumb||'').length + ':' + (p.thumb||'').slice(-24);
+  const setzen = src => { if (src && $('pfHero') === hero) hero.src = src; };
+  if (BILDER[k]) return setzen(BILDER[k]);
+  api('getTitelfoto', id).then(src => { if(src) BILDER[k] = src; setzen(src); }).catch(()=>{});
+}
 async function ladeTagebuch(id){
+  titelfotoLaden(id); // parallel zur Fotoliste, nicht erst danach
   try {
     const fotos = await api('getFotos', id);
     S.tmp.fotos = fotos;
-    const hero = $('pfHero');
-    if (hero && fotos.length) api('getFoto', fotos[0].id).then(src => { if ($('pfHero') === hero) hero.src = src; }).catch(()=>{});
     const el = $('tagebuch'); if(!el) return;
     if(!fotos.length){ el.innerHTML = 'Noch keine Fotos. Mit „Foto ins Tagebuch“ oder „Zustand prüfen“ dokumentierst du das Wachstum.'; return; }
     el.className = 'tagebuch';
@@ -655,7 +664,8 @@ async function ladeTagebuch(id){
 async function fotoAnsehen(fotoId){
   const f = (S.tmp.fotos||[]).find(x=>x.id===fotoId);
   let bild;
-  try { bild = await mit('Lade Foto …', ()=>api('getFoto', fotoId)); } catch(e){ return; }
+  if (BILDER[fotoId]) bild = BILDER[fotoId];
+  else { try { bild = await mit('Lade Foto …', ()=>api('getFoto', fotoId)); BILDER[fotoId] = bild; } catch(e){ return; } }
   const b = f && f.bewertung ? (()=>{ try { return JSON.parse(f.bewertung); } catch(e){ return null; } })() : null;
   let html = '<img src="'+esc(bild)+'" style="width:100%;border-radius:12px">';
   if(f){

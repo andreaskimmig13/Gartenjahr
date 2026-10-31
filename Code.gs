@@ -4,7 +4,7 @@
  * KI: Claude API (Schlüssel in den Skripteigenschaften).
  * Wetter: Open-Meteo (kostenlos, ohne Schlüssel).
  */
-const VERSION = '1.0.11';
+const VERSION = '1.0.12';
 const TZ = 'Europe/Berlin';
 
 const TABELLEN = {
@@ -826,7 +826,7 @@ function bestimmeFoto(bild, vermutung) {
     'Antworte NUR mit JSON:\n' +
     '{"kandidaten":[{"name":"deutscher Name","botanisch":"botanischer Name","sorte":"falls sicher erkennbar, sonst leer","sicherheit":Zahl 0–100,"merkmale":"woran erkannt, 1 Satz"}],"hinweis":"was ein besseres Foto zeigen sollte, sonst leer"}\n' +
     'Höchstens 4 Kandidaten, der wahrscheinlichste zuerst. Ist keine Pflanze erkennbar, bleibt "kandidaten" leer.',
-    b64_(bild), 1200);
+    b64_(bild), 1200, 'medium');
 }
 
 function fotoHinzufuegen(pflanzeId, foto, notiz) {
@@ -859,7 +859,7 @@ function pruefeFoto(pflanzeId, foto, notiz) {
     '"wachstum":"Entwicklungsstand in einem Satz (für das Wachstumstagebuch)",' +
     '"massnahmen":[{"titel":"konkrete Aufgabe","kategorie":"Schnitt" | "Düngen" | "Gießen" | "Pflanzenschutz" | "Umtopfen" | "Winterschutz" | "Pflege","dringend":true | false,"hinweis":"wie genau","material":"Einkaufsartikel oder leer"}]}\n' +
     'Nur Maßnahmen, die wirklich nötig sind und zur Jahreszeit passen – entspannt und pragmatisch, kein Dünger ohne klaren Mangel. Wenn nichts zu tun ist, bleibt "massnahmen" leer. Wenn das Foto unklar ist, sage es in der Zusammenfassung.';
-  const r = claude_(SYS_GAERTNER, text, b64_(foto.bild), 1500);
+  const r = claude_(SYS_GAERTNER, text, b64_(foto.bild), 1500, 'medium');
   mitSperre_(function () {
     fotoSpeichern_(p, foto, 'Check', notiz || '', { zustand: r.zustand || '', bewertung: JSON.stringify(r) });
   });
@@ -877,6 +877,14 @@ function getFoto(fotoId) {
   return 'data:image/jpeg;base64,' + Utilities.base64Encode(blob.getBytes());
 }
 
+/** Neuestes Foto einer Pflanze in voller Größe (für das Titelbild der Detailseite). */
+function getTitelfoto(pflanzeId) {
+  const f = lesen_('Fotos').filter(function (x) { return x.pflanzeId === pflanzeId; })
+    .sort(function (a, b) { return a.datum < b.datum ? 1 : -1; })[0];
+  if (!f) return '';
+  return 'data:image/jpeg;base64,' + Utilities.base64Encode(DriveApp.getFileById(f.fileId).getBlob().getBytes());
+}
+
 function loescheFoto(fotoId) {
   return mitSperre_(function () {
     const f = finde_('Fotos', fotoId);
@@ -889,17 +897,24 @@ function loescheFoto(fotoId) {
   });
 }
 
-/** Aufruf der Claude API. Gibt das JSON-Objekt aus der Antwort zurück. */
-/** Aufruf der Claude API. Die Antwort kommt über ein Werkzeug als garantiert gültiges JSON-Objekt. */
-function claude_(system, text, bildB64, maxTokens) {
-  try { return claudeEinmal_(system, text, bildB64, maxTokens); }
+/**
+ * Aufruf der Claude API. Gibt das JSON-Objekt aus der Antwort zurück.
+ * Aktuelle Modelle denken vor der Antwort selbstständig nach („adaptive thinking“). Dieses Nachdenken
+ * zählt zu max_tokens und kostet Zeit. Daher: Aufwand (effort) pro Aufgabe begrenzen und Puffer
+ * für das Nachdenken auf max_tokens aufschlagen. Kein erzwungenes Werkzeug mehr – das unterstützen
+ * diese Modelle nicht; die Prompts verlangen ohnehin reines JSON.
+ * aufwand: 'low' (Steckbrief, Test) | 'medium' (Foto-Bestimmung, Zustand)
+ */
+function claude_(system, text, bildB64, maxTokens, aufwand) {
+  const max = (maxTokens || 2000) + 4000;
+  try { return claudeEinmal_(system, text, bildB64, max, aufwand || 'low'); }
   catch (e) {
-    if (e && e.wiederholen) return claudeEinmal_(system, text, bildB64, Math.round((maxTokens || 2000) * 1.5));
+    if (e && e.wiederholen) return claudeEinmal_(system, text, bildB64, Math.round(max * 1.5), 'low');
     throw e;
   }
 }
 
-function claudeEinmal_(system, text, bildB64, maxTokens) {
+function claudeEinmal_(system, text, bildB64, maxTokens, aufwand) {
   const key = prop_('CLAUDE_API_KEY');
   if (!key) throw new Error('Es ist noch kein Claude-API-Schlüssel hinterlegt (Mehr → Einstellungen).');
   const s = einstellungen_();
@@ -907,30 +922,28 @@ function claudeEinmal_(system, text, bildB64, maxTokens) {
   const content = [];
   if (bildB64) content.push({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: bildB64 } });
   content.push({ type: 'text', text: text });
-  // Manche Modelle erlauben kein erzwungenes Werkzeug (tool_choice "tool"/"any").
-  // Dann ohne Zwang anfragen und das Modell per Systemhinweis aufs Werkzeug lenken.
+  // Ältere Modelle kennen den Aufwand-Parameter nicht – dann ohne ihn (gemerkt für 6 Stunden).
   const cache = CacheService.getScriptCache();
-  const ohneZwangKey = 'ohneToolZwang_' + modell;
-  let ohneZwang = cache.get(ohneZwangKey) === '1';
-  let res, code, body, msg;
+  const ohneAufwandKey = 'ohneEffort_' + modell;
+  let ohneAufwand = cache.get(ohneAufwandKey) === '1';
+  let code, body, msg;
   for (let versuch = 0; versuch < 2; versuch++) {
     const anfrage = {
-      model: modell, max_tokens: maxTokens || 2000,
-      system: ohneZwang ? system + '\n\nGib deine Antwort ausschließlich über das Werkzeug „antwort“ zurück, ohne zusätzlichen Text.' : system,
-      messages: [{ role: 'user', content: content }],
-      tools: [{ name: 'antwort', description: 'Gibt die Antwort als JSON-Objekt genau im verlangten Format zurück.', input_schema: { type: 'object' } }],
-      tool_choice: ohneZwang ? { type: 'auto' } : { type: 'tool', name: 'antwort' }
+      model: modell, max_tokens: maxTokens,
+      system: system + '\n\nAntworte ausschließlich mit einem gültigen JSON-Objekt, ohne Markdown und ohne Text davor oder danach.',
+      messages: [{ role: 'user', content: content }]
     };
-    res = UrlFetchApp.fetch('https://api.anthropic.com/v1/messages', {
+    if (!ohneAufwand) anfrage.output_config = { effort: aufwand };
+    const res = UrlFetchApp.fetch('https://api.anthropic.com/v1/messages', {
       method: 'post', contentType: 'application/json', muteHttpExceptions: true,
       headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01' },
       payload: JSON.stringify(anfrage)
     });
     code = res.getResponseCode(); body = res.getContentText(); msg = body;
     try { msg = JSON.parse(body).error.message; } catch (e) { /* roh */ }
-    if (code === 400 && !ohneZwang && /tool_choice/i.test(msg)) {
-      ohneZwang = true;
-      cache.put(ohneZwangKey, '1', 21600);
+    if (code === 400 && !ohneAufwand && /effort|output_config/i.test(msg)) {
+      ohneAufwand = true;
+      cache.put(ohneAufwandKey, '1', 21600);
       continue;
     }
     break;
@@ -944,13 +957,10 @@ function claudeEinmal_(system, text, bildB64, maxTokens) {
     throw fehler;
   }
   const data = JSON.parse(body);
-  const werkzeug = (data.content || []).filter(function (c) { return c.type === 'tool_use'; })[0];
   if (data.stop_reason === 'max_tokens') {
     const f = new Error('Die KI-Antwort war zu lang und wurde abgeschnitten. Bitte noch einmal versuchen.');
     f.wiederholen = true; throw f;
   }
-  if (werkzeug && werkzeug.input && Object.keys(werkzeug.input).length) return werkzeug.input;
-  // Rückfall: JSON aus Text lesen
   const out = (data.content || []).filter(function (c) { return c.type === 'text'; }).map(function (c) { return c.text; }).join('');
   try { return jsonAus_(out); }
   catch (e) { const f = new Error('Die KI-Antwort war nicht lesbar. Bitte noch einmal versuchen.'); f.wiederholen = true; throw f; }
