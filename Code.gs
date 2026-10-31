@@ -4,7 +4,7 @@
  * KI: Claude API (Schlüssel in den Skripteigenschaften).
  * Wetter: Open-Meteo (kostenlos, ohne Schlüssel).
  */
-const VERSION = '1.0.2';
+const VERSION = '1.0.3';
 const TZ = 'Europe/Berlin';
 
 const TABELLEN = {
@@ -386,7 +386,7 @@ function syncAufgaben_() {
   const heute = heute_();
   const vorlagen = vorlagen_();
   // Offene geplante Aufgaben entfernen, deren Vorlage es nicht mehr gibt (z. B. reine Kontrollaufgaben)
-  const weg = veralteteAufgaben_(lesen_('Aufgaben'), vorlagen);
+  const weg = veralteteAufgaben_(lesen_('Aufgaben'), vorlagen, heute);
   if (weg.length) { const set = {}; weg.forEach(function (id) { set[id] = true; }); zeilenLoeschen_('Aufgaben', function (a) { return set[a.id]; }); }
   const alle = lesen_('Aufgaben');
   const neu = planeAufgaben_(vorlagen, alle.map(function (a) { return a.key; }), heute);
@@ -413,11 +413,13 @@ function istKontrollaufgabe_(a) {
 }
 
 /** IDs offener, automatisch geplanter Aufgaben, zu denen es keine Vorlage mehr gibt. */
-function veralteteAufgaben_(alle, vorlagen) {
+function veralteteAufgaben_(alle, vorlagen, heute) {
+  const vorlauf = heute ? addTage_(heute, 10) : '9999';
   const gueltig = {};
   vorlagen.forEach(function (v) { gueltig[[v.quelle, v.bezugId, v.vkey].join('|')] = true; });
   return alle.filter(function (a) {
     if (a.status !== 'offen' || !a.key) return false;
+    if (a.key.indexOf('#') > 0 && a.von > vorlauf) return true; // weit vorausgeplante Wiederholungen
     return !gueltig[a.key.split('|').slice(0, 3).join('|')];
   }).map(function (a) { return a.id; });
 }
@@ -427,6 +429,7 @@ function planeAufgaben_(vorlagen, vorhandeneKeys, heute) {
   const keys = {};
   vorhandeneKeys.forEach(function (k) { if (k) keys[k] = true; });
   const limit = addTage_(heute, 365);
+  const vorlauf = addTage_(heute, 10);
   const y = Number(heute.slice(0, 4));
   const neu = [];
   vorlagen.forEach(function (v) {
@@ -448,7 +451,8 @@ function planeAufgaben_(vorlagen, vorhandeneKeys, heute) {
         stuecke.push({ von: von, bis: bis, suf: '' });
       }
       stuecke.forEach(function (st) {
-        if (st.bis < heute || st.von > limit) return;
+        // Wiederkehrende Aufgaben (z. B. alle 14 Tage düngen) nur als nächsten Termin einplanen
+        if (st.bis < heute || st.von > (st.suf ? vorlauf : limit)) return;
         const key = [v.quelle, v.bezugId, v.vkey, j].join('|') + st.suf;
         if (keys[key]) return;
         keys[key] = true;
