@@ -135,6 +135,11 @@ textarea{min-height:70px;resize:vertical}
 #laden.zu{display:none}
 .spinner{width:42px;height:42px;border-radius:50%;border:4px solid rgba(255,255,255,.3);border-top-color:#fff;animation:dreh 0.9s linear infinite}
 @keyframes dreh{to{transform:rotate(360deg)}}
+#frage{position:fixed;inset:0;z-index:95;display:flex;align-items:center;justify-content:center;padding:24px;background:rgba(10,15,10,.5)}
+#frage.zu{display:none}
+#frage .box{background:var(--karte);color:var(--text);border-radius:16px;padding:18px;max-width:380px;width:100%;box-shadow:0 8px 30px rgba(0,0,0,.3)}
+#frage .box p{margin:0 0 16px;font-size:15px}
+#frage .reihe{justify-content:flex-end}
 #toast{position:fixed;left:50%;bottom:84px;transform:translateX(-50%);z-index:90;background:#1f2a21;color:#fff;padding:10px 16px;border-radius:12px;font-size:14px;max-width:90vw;opacity:0;pointer-events:none;transition:opacity .2s}
 #toast.an{opacity:1}
 #toast.fehler{background:var(--rot);color:#fff}
@@ -157,6 +162,7 @@ textarea{min-height:70px;resize:vertical}
 <div id="sheet" class="sheet zu"><div class="sheet-bg" onclick="sheetZu()"></div><div class="sheet-box"><div class="griff"></div><div id="sheetInhalt"></div></div></div>
 <div id="laden" class="zu"><div class="spinner"></div><div id="ladenText"></div></div>
 <div id="toast"></div>
+<div id="frage" class="zu"><div class="box"><p id="frageText"></p><div class="reihe"><button class="knopf zwei" id="frageNein">Abbrechen</button><button class="knopf" id="frageJa">OK</button></div></div></div>
 <input type="file" id="dateiInput" accept="image/*" style="display:none">
 
 <script>
@@ -178,6 +184,15 @@ function api(fn, ...args){
 }
 function esc(s){ return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function $(id){ return document.getElementById(id); }
+/** Eigene Rückfrage statt confirm() – ohne Browser-Überschrift. */
+function frage(text, jaText){
+  return new Promise(res => {
+    $('frageText').textContent = text; $('frageJa').textContent = jaText || 'OK';
+    $('frage').classList.remove('zu');
+    const ende = v => { $('frage').classList.add('zu'); res(v); };
+    $('frageJa').onclick = () => ende(true); $('frageNein').onclick = () => ende(false);
+  });
+}
 function laden(t){ $('ladenText').textContent = t || ''; $('laden').classList.remove('zu'); }
 function fertig(){ $('laden').classList.add('zu'); }
 let toastT;
@@ -372,7 +387,7 @@ async function aufgabeHaken(id){
 async function alleErledigt(){
   const h = heute();
   const ids = S.d.aufgaben.filter(a=>a.status==='offen' && a.von<=h && katPasst(a) && (!S.flFilter || aufgabeFlaeche(a)===S.flFilter)).map(a=>a.id);
-  if(!ids.length || !confirm(ids.length+' Aufgaben als erledigt markieren?')) return;
+  if(!ids.length || !await frage(ids.length+' Aufgaben als erledigt markieren?')) return;
   await mit('Speichere …', ()=>api('aufgabenErledigt', ids));
   neuLaden(true);
 }
@@ -397,7 +412,7 @@ function aufgabeDetail(id){
   sheet(esc(a.titel), html);
 }
 async function aufgabeAktion(id, aktion){
-  if(aktion==='loeschen' && !confirm('Aufgabe löschen?')) return;
+  if(aktion==='loeschen' && !await frage('Aufgabe löschen?')) return;
   await mit('Speichere …', ()=>api('aufgabeAktion', id, aktion));
   sheetZu(); toast({verschieben:'Verschoben',ueberspringen:'Übersprungen',offen:'Wieder offen',loeschen:'Gelöscht'}[aktion]||'Gespeichert');
   neuLaden(true);
@@ -631,7 +646,7 @@ async function fotoAnsehen(fotoId){
   sheet('Foto', html);
 }
 async function fotoLoeschen(id, pid){
-  if(!confirm('Foto löschen?')) return;
+  if(!await frage('Foto löschen?')) return;
   await mit('Lösche …', ()=>api('loescheFoto', id));
   await neuLaden(true); pflanzeDetail(pid);
 }
@@ -711,13 +726,13 @@ async function angleichen(id){
 }
 function pflanzeBearbeiten(id){ const p=S.pfM[id]; pflanzeForm(p, null, id); }
 async function steckbriefNeu(id){
-  if(!confirm('Steckbrief und Pflegeplan neu von der KI erstellen lassen? Offene geplante Aufgaben dieser Pflanze werden ersetzt.')) return;
+  if(!await frage('Steckbrief und Pflegeplan neu von der KI erstellen lassen? Offene geplante Aufgaben dieser Pflanze werden ersetzt.')) return;
   let r; try { r = await mit('Steckbrief wird neu erstellt …', ()=>api('neuerSteckbrief', id)); } catch(e){ return; }
   await neuLaden(true); pflanzeDetail(id);
   toast(r && r.angeglichen ? 'Steckbrief aktualisiert – auch bei '+r.angeglichen+' gleicher Pflanze(n)' : 'Steckbrief aktualisiert');
 }
 async function pflanzeLoeschen(id){
-  if(!confirm('„'+S.pfM[id].name+'“ mit allen Fotos und offenen Aufgaben löschen?')) return;
+  if(!await frage('„'+S.pfM[id].name+'“ mit allen Fotos und offenen Aufgaben löschen?')) return;
   await mit('Lösche …', ()=>api('loeschePflanze', id));
   sheetZu(); neuLaden(true); toast('Gelöscht');
 }
@@ -754,7 +769,7 @@ async function flaecheSpeichern(id){
   sheetZu(); toast('Gespeichert'); neuLaden(true);
 }
 async function flaecheLoeschen(id){
-  if(!confirm('Fläche löschen?')) return;
+  if(!await frage('Fläche löschen?')) return;
   await mit('Lösche …', ()=>api('loescheFlaeche', id));
   sheetZu(); neuLaden(true);
 }
@@ -775,7 +790,7 @@ async function kreisSpeichern(id){
   sheetZu(); toast('Gespeichert'); neuLaden(true);
 }
 async function kreisLoeschen(id){
-  if(!confirm('Kreis löschen?')) return;
+  if(!await frage('Kreis löschen?')) return;
   await mit('Lösche …', ()=>api('loescheKreis', id));
   sheetZu(); neuLaden(true);
 }
