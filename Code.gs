@@ -4,7 +4,7 @@
  * KI: Claude API (Schlüssel in den Skripteigenschaften).
  * Wetter: Open-Meteo (kostenlos, ohne Schlüssel).
  */
-const VERSION = '1.0.6';
+const VERSION = '1.0.7';
 const TZ = 'Europe/Berlin';
 
 const TABELLEN = {
@@ -29,6 +29,9 @@ const STANDARD = {
 
 const SYS_GAERTNER = 'Du bist ein erfahrener Gärtnermeister in Deutschland und berätst einen Hobbygärtner. ' +
   'Deine Angaben sind praxisnah, jahreszeitlich korrekt für Mitteleuropa und knapp formuliert. ' +
+  'Der Besitzer gärtnert entspannt und pragmatisch: Nenne realistische Erfahrungswerte aus der Praxis, nicht die vorsichtigsten Werte mit Sicherheitsaufschlag ' +
+  '(z. B. bei Winterhärte die Temperatur, die eine eingewachsene Pflanze in der Praxis typischerweise verträgt). Empfiehl nur, was wirklich nötig ist. ' +
+  'Düngen nur so viel wie unbedingt nötig: lieber wenige Gaben (z. B. ein Langzeit- oder organischer Dünger im Frühjahr) als häufiges Flüssigdüngen; viele Gehölze und Stauden im Beet brauchen kaum oder gar keinen Dünger – dann auch keinen einplanen. ' +
   'Antworte ausschließlich mit gültigem JSON, ohne Markdown und ohne Text davor oder danach.';
 
 /* ============================================================
@@ -36,15 +39,13 @@ const SYS_GAERTNER = 'Du bist ein erfahrener Gärtnermeister in Deutschland und 
  * ============================================================ */
 const RASEN = [
   { vkey: 'duengen-fruehjahr', kategorie: 'Düngen', titel: 'Rasen düngen (Frühjahr)', von: '03-20', bis: '04-30',
-    hinweis: 'Sobald der Rasen wieder wächst (Boden ca. 8–10 °C). Langzeitdünger, am besten vor leichtem Regen ausbringen. Wächst viel Moos, kann ein zu saurer Boden die Ursache sein – dann den pH-Wert testen und ggf. kalken (nicht gleichzeitig mit dem Dünger).', material: 'Rasendünger Frühjahr (Langzeit)' },
+    hinweis: 'Sobald der Rasen wieder wächst (Boden ca. 8–10 °C). Langzeitdünger, am besten vor leichtem Regen ausbringen. Da der Mähroboter mulcht und Nährstoffe zurückführt, reichen meist diese Gabe und der Herbstdünger. Wächst viel Moos, kann ein zu saurer Boden die Ursache sein – dann den pH-Wert testen und ggf. kalken (nicht gleichzeitig mit dem Dünger).', material: 'Rasendünger Frühjahr (Langzeit)' },
   { vkey: 'vertikutieren', kategorie: 'Rasen', titel: 'Vertikutieren', von: '04-15', bis: '05-31',
     hinweis: 'Etwa 2–3 Wochen nach dem Düngen, bei abgetrocknetem Boden. Vorher den Mähroboter tief mähen lassen (ca. 3 cm). Längs und quer vertikutieren, Filz abrechen.', material: '' },
   { vkey: 'sanden', kategorie: 'Rasen', titel: 'Sanden', von: '04-15', bis: '05-31',
     hinweis: 'Direkt nach dem Vertikutieren 3–5 l Quarzsand (0–2 mm) je m² dünn verteilen und mit dem Rechenrücken einarbeiten. Lockert den Boden, besonders wichtig bei Lehm.', material: 'Rasensand / Quarzsand 0–2 mm' },
   { vkey: 'nachsaat-fruehjahr', kategorie: 'Rasen', titel: 'Kahle Stellen nachsäen', von: '04-15', bis: '05-31',
     hinweis: 'Nach dem Sanden. Saat leicht andrücken und 2–3 Wochen gleichmäßig feucht halten. Den Mähroboter diese Stellen so lange aussparen lassen.', material: 'Nachsaat-Rasensamen' },
-  { vkey: 'duengen-sommer', kategorie: 'Düngen', titel: 'Rasen düngen (Sommer)', von: '06-01', bis: '06-30',
-    hinweis: 'Zweite Gabe. Nicht bei Hitze über 25 °C oder bei Trockenheit ausbringen.', material: 'Rasendünger Sommer' },
   { vkey: 'herbstpflege', kategorie: 'Rasen', titel: 'Herbstpflege: Lücken nachsäen', von: '08-20', bis: '09-30',
     hinweis: 'Der Spätsommer ist die beste Zeit für Nachsaat (warmer Boden, mehr Feuchtigkeit). Bei starkem Filz vorher leicht vertikutieren.', material: '' },
   { vkey: 'duengen-herbst', kategorie: 'Düngen', titel: 'Herbstdünger (kaliumbetont)', von: '09-01', bis: '10-31',
@@ -441,9 +442,10 @@ function planeAufgaben_(vorlagen, vorhandeneKeys, heute) {
     [y - 1, y, y + 1].forEach(function (j) {
       const von = datumAus_(j, von0);
       const bis = datumAus_(bis0 < von0 ? j + 1 : j, bis0);
-      const iv = Math.round(Number(v.intervallTage) || 0);
+      let iv = Math.round(Number(v.intervallTage) || 0);
       const stuecke = [];
       if (iv >= 14) {
+        if (iv < 21) iv = 21; // nicht häufiger als alle 3 Wochen
         let d = von, i = 0;
         while (d <= bis && i < 30) {
           const e = addTage_(d, iv - 1);
@@ -651,7 +653,8 @@ function profilPrompt_(k) {
     '}\n\n' +
     'Regeln für "aufgaben": nur Arbeiten, die in einem normalen Jahr ohne besondere Vorkommnisse tatsächlich erledigt werden müssen, mit realistischem Zeitfenster für Deutschland (MM-TT, z. B. "03-15"). ' +
     'KEINE Kontroll- oder Beobachtungsaufgaben wie "auf Schädlinge prüfen", "Blätter kontrollieren" oder "Zustand beobachten" – was man im Blick behalten sollte, gehört in "schaedlinge" bzw. "tipps". ' +
-    'Schnitt und Düngen haben Vorrang und sollen vollständig sein. Für regelmäßiges Düngen EINE Aufgabe über den ganzen Düngezeitraum mit "intervallTage" (mindestens 14, z. B. 14 oder 28); für einmalige Gaben intervallTage null. ' +
+    'Schnitt hat Vorrang und soll vollständig sein. Düngen nur, wenn die Pflanze es wirklich braucht, mit so wenigen Gaben wie möglich; bevorzuge Langzeitdünger. ' +
+    'Nur wenn regelmäßiges Flüssigdüngen unvermeidbar ist (z. B. Starkzehrer im Topf), EINE Aufgabe über den Zeitraum mit "intervallTage" (mindestens 21, eher 28); sonst intervallTage null. ' +
     'Bei Topfpflanzen mit Winterquartier: "Ins Winterquartier räumen" und "Ausräumen" mit Zeitfenster. Bleibt die Pflanze im Winter draußen, KEIN "Ins Winterquartier", sondern die nötigen Winterschutz-Maßnahmen am Standort und deren Abbau im Frühjahr. ' +
     'Hat der Besitzer sein Vorgehen beschrieben, plane genau dieses Vorgehen ein (mit passenden Zeitfenstern) statt allgemeiner Empfehlungen. ' +
     'Keine Gießaufgaben. Höchstens 8 Aufgaben. "material" nur, wenn etwas gekauft werden muss (z. B. "Rosendünger").';
@@ -797,7 +800,7 @@ function pruefeFoto(pflanzeId, foto, notiz) {
     '{"zustand":"gut" | "mittel" | "schlecht","zusammenfassung":"2–3 Sätze","beobachtungen":["konkrete Beobachtungen am Foto"],' +
     '"wachstum":"Entwicklungsstand in einem Satz (für das Wachstumstagebuch)",' +
     '"massnahmen":[{"titel":"konkrete Aufgabe","kategorie":"Schnitt" | "Düngen" | "Gießen" | "Pflanzenschutz" | "Umtopfen" | "Winterschutz" | "Pflege","dringend":true | false,"hinweis":"wie genau","material":"Einkaufsartikel oder leer"}]}\n' +
-    'Nur sinnvolle, zur Jahreszeit passende Maßnahmen. Wenn nichts zu tun ist, bleibt "massnahmen" leer. Wenn das Foto unklar ist, sage es in der Zusammenfassung.';
+    'Nur Maßnahmen, die wirklich nötig sind und zur Jahreszeit passen – entspannt und pragmatisch, kein Dünger ohne klaren Mangel. Wenn nichts zu tun ist, bleibt "massnahmen" leer. Wenn das Foto unklar ist, sage es in der Zusammenfassung.';
   const r = claude_(SYS_GAERTNER, text, b64_(foto.bild), 1500);
   mitSperre_(function () {
     fotoSpeichern_(p, foto, 'Check', notiz || '', { zustand: r.zustand || '', bewertung: JSON.stringify(r) });
