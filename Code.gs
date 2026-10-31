@@ -4,7 +4,7 @@
  * KI: Claude API (Schlüssel in den Skripteigenschaften).
  * Wetter: Open-Meteo (kostenlos, ohne Schlüssel).
  */
-const VERSION = '1.0.0';
+const VERSION = '1.0.1';
 const TZ = 'Europe/Berlin';
 
 const TABELLEN = {
@@ -35,10 +35,8 @@ const SYS_GAERTNER = 'Du bist ein erfahrener Gärtnermeister in Deutschland und 
  * Feste Jahrespläne: Rasen, Mähroboter, Bewässerung
  * ============================================================ */
 const RASEN = [
-  { vkey: 'ph', kategorie: 'Rasen', titel: 'Boden-pH prüfen (alle 2–3 Jahre)', von: '03-01', bis: '03-31',
-    hinweis: 'Bodentest aus dem Baumarkt. Liegt der pH-Wert unter ca. 5,5 (Sandboden) bzw. 6 (Lehmboden), kalken – nie gleichzeitig mit dem Dünger, mindestens 4 Wochen Abstand. Bei normalem Wert diese Aufgabe überspringen.', material: '' },
   { vkey: 'duengen-fruehjahr', kategorie: 'Düngen', titel: 'Rasen düngen (Frühjahr)', von: '03-20', bis: '04-30',
-    hinweis: 'Sobald der Rasen wieder wächst (Boden ca. 8–10 °C). Langzeitdünger, am besten vor leichtem Regen ausbringen.', material: 'Rasendünger Frühjahr (Langzeit)' },
+    hinweis: 'Sobald der Rasen wieder wächst (Boden ca. 8–10 °C). Langzeitdünger, am besten vor leichtem Regen ausbringen. Wächst viel Moos, kann ein zu saurer Boden die Ursache sein – dann den pH-Wert testen und ggf. kalken (nicht gleichzeitig mit dem Dünger).', material: 'Rasendünger Frühjahr (Langzeit)' },
   { vkey: 'vertikutieren', kategorie: 'Rasen', titel: 'Vertikutieren', von: '04-15', bis: '05-31',
     hinweis: 'Etwa 2–3 Wochen nach dem Düngen, bei abgetrocknetem Boden. Vorher den Mähroboter tief mähen lassen (ca. 3 cm). Längs und quer vertikutieren, Filz abrechen.', material: '' },
   { vkey: 'sanden', kategorie: 'Rasen', titel: 'Sanden', von: '04-15', bis: '05-31',
@@ -58,8 +56,8 @@ const RASEN = [
 const BEWAESSERUNG = [
   { vkey: 'bew-start', kategorie: 'Bewässerung', titel: 'Bewässerung in Betrieb nehmen', von: '04-10', bis: '05-10',
     hinweis: 'Nach den letzten Frösten: Leitungen anschließen und auf Lecks prüfen, Tropfer und Düsen reinigen, Batterie im Steuergerät wechseln, Programme an die Pflanzen anpassen.', material: 'Batterien für Steuergerät' },
-  { vkey: 'bew-sommer', kategorie: 'Bewässerung', titel: 'Bewässerung prüfen (Hochsommer)', von: '07-01', bis: '07-15',
-    hinweis: 'Filter reinigen, Tropfer kontrollieren, Laufzeiten bei Hitze erhöhen – Topfpflanzen brauchen dann oft deutlich mehr.', material: '' },
+  { vkey: 'bew-sommer', kategorie: 'Bewässerung', titel: 'Bewässerung: Filter reinigen, Laufzeiten erhöhen', von: '07-01', bis: '07-15',
+    hinweis: 'Filter reinigen und Laufzeiten an die Sommerhitze anpassen – Topfpflanzen brauchen dann oft deutlich mehr.', material: '' },
   { vkey: 'bew-winter', kategorie: 'Bewässerung', titel: 'Bewässerung winterfest machen', von: '10-15', bis: '11-15',
     hinweis: 'Vor dem ersten Frost: Wasser abstellen, Leitungen entleeren bzw. ausblasen, Steuergerät, Ventile und Pumpe frostfrei einlagern, Batterien entnehmen.', material: '' }
 ];
@@ -69,13 +67,11 @@ function robotVorlagen_(s) {
   const en = normMD_(s.robotEnde) || '10-31';
   return [
     { vkey: 'robot-start', kategorie: 'Mähroboter', titel: 'Mähroboter starten (Saisonbeginn)', von: shiftMD_(st, -7), bis: shiftMD_(st, 14),
-      hinweis: 'Wenn der Rasen wieder wächst. Vorher Messer prüfen bzw. wechseln, Ladestation und Kontakte reinigen, App/Firmware aktualisieren, Mähzeiten einstellen. Die ersten Schnitte etwas höher.', material: 'Ersatzmesser Mähroboter' },
-    { vkey: 'robot-messer-sommer', kategorie: 'Mähroboter', titel: 'Mähroboter: Messer und Unterseite prüfen', von: '06-15', bis: '06-30',
-      hinweis: 'Stumpfe Messer fransen die Halme aus (braune Spitzen). Unterseite von Grasresten befreien.', material: '' },
+      hinweis: 'Wenn der Rasen wieder wächst. Vorher Messer wechseln, Ladestation und Kontakte reinigen, App/Firmware aktualisieren, Mähzeiten einstellen. Die ersten Schnitte etwas höher.', material: 'Ersatzmesser Mähroboter' },
+    { vkey: 'robot-messer-wechsel', kategorie: 'Mähroboter', titel: 'Mähroboter: Messer wechseln', von: '06-15', bis: '06-30',
+      hinweis: 'Zur Saisonmitte die Messer tauschen und dabei die Unterseite von Grasresten befreien. Stumpfe Messer fransen die Halme aus (braune Spitzen).', material: 'Ersatzmesser Mähroboter' },
     { vkey: 'robot-hitze', kategorie: 'Mähroboter', titel: 'Mähroboter: Sommerbetrieb anpassen', von: '07-01', bis: '07-15',
       hinweis: 'Bei Hitze und Trockenheit Schnitthöhe erhöhen, Mähzeiten reduzieren und nicht in der Mittagshitze mähen.', material: '' },
-    { vkey: 'robot-messer-spaet', kategorie: 'Mähroboter', titel: 'Mähroboter: Messer prüfen', von: '08-15', bis: '08-31',
-      hinweis: 'Messer prüfen und bei Bedarf wechseln.', material: '' },
     { vkey: 'robot-pause', kategorie: 'Mähroboter', titel: 'Mähroboter in die Winterpause', von: shiftMD_(en, -7), bis: shiftMD_(en, 14),
       hinweis: 'Wenn der Rasen kaum noch wächst: Mähplan deaktivieren, Gerät gründlich reinigen (nicht mit dem Wasserstrahl), Akku nach Herstellerangabe laden, trocken und frostfrei lagern. Ladestation je nach Hersteller abbauen oder abdecken.', material: '' }
   ];
@@ -367,7 +363,7 @@ function vorlagen_() {
     const prof = parse_(p.profil);
     if (!prof || !Array.isArray(prof.aufgaben)) return;
     prof.aufgaben.forEach(function (a) {
-      if (!a || !a.titel) return;
+      if (!a || !a.titel || istKontrollaufgabe_(a)) return;
       v.push({
         quelle: 'pflanze', bezugId: p.id, vkey: slug_((a.kategorie || '') + '-' + a.titel),
         kategorie: a.kategorie || 'Pflege', titel: a.titel, von: a.von, bis: a.bis,
@@ -387,8 +383,12 @@ function vorlagen_() {
 /** Erzeugt fehlende Aufgaben für die nächsten 12 Monate und markiert lange Überfälliges als verpasst. */
 function syncAufgaben_() {
   const heute = heute_();
+  const vorlagen = vorlagen_();
+  // Offene geplante Aufgaben entfernen, deren Vorlage es nicht mehr gibt (z. B. reine Kontrollaufgaben)
+  const weg = veralteteAufgaben_(lesen_('Aufgaben'), vorlagen);
+  if (weg.length) { const set = {}; weg.forEach(function (id) { set[id] = true; }); zeilenLoeschen_('Aufgaben', function (a) { return set[a.id]; }); }
   const alle = lesen_('Aufgaben');
-  const neu = planeAufgaben_(vorlagen_(), alle.map(function (a) { return a.key; }), heute);
+  const neu = planeAufgaben_(vorlagen, alle.map(function (a) { return a.key; }), heute);
   einfuegen_('Aufgaben', neu.map(function (n) {
     return Object.assign(n, { id: id_('a'), status: 'offen', erledigtAm: '', angelegt: jetzt_() });
   }));
@@ -403,6 +403,22 @@ function syncAufgaben_() {
   });
   PropertiesService.getScriptProperties().setProperty('LAST_SYNC', String(Date.now()));
   return neu.length;
+}
+
+/** Kontroll-/Beobachtungsaufgaben gehören nicht in den Aufgabenspeicher, sondern in den Steckbrief. */
+function istKontrollaufgabe_(a) {
+  if (a.kategorie === 'Pflanzenschutz') return true;
+  return /(kontroll|überprüf|prüfen|beobacht|befall|ausschau|im blick)/i.test(String(a.titel || ''));
+}
+
+/** IDs offener, automatisch geplanter Aufgaben, zu denen es keine Vorlage mehr gibt. */
+function veralteteAufgaben_(alle, vorlagen) {
+  const gueltig = {};
+  vorlagen.forEach(function (v) { gueltig[[v.quelle, v.bezugId, v.vkey].join('|')] = true; });
+  return alle.filter(function (a) {
+    if (a.status !== 'offen' || !a.key) return false;
+    return !gueltig[a.key.split('|').slice(0, 3).join('|')];
+  }).map(function (a) { return a.id; });
 }
 
 /** Reine Planungslogik (ohne Tabellenzugriff, damit testbar). */
@@ -617,10 +633,12 @@ function profilPrompt_(k) {
     ' "frostgrenze": Zahl in °C, bis zu der die Pflanze ausgepflanzt ohne Schutz durchhält (z. B. -20 für sehr winterhart, 5 für sehr empfindlich), null bei reinen Zimmerpflanzen,\n' +
     ' "frostempfindlich": true | false,\n' +
     ' "giftigkeit": {"stufe": "ungiftig" | "leicht giftig" | "giftig" | "stark giftig", "text": "für Kinder und Haustiere (Hund, Katze): welche Teile, welche Wirkung"},\n' +
+    ' "schaedlinge": "typische Schädlinge und Krankheiten, woran man sie erkennt, was vorbeugt",\n' +
     ' "tipps": ["2–4 kurze, konkrete Pflegetipps"],\n' +
-    ' "aufgaben": [{"kategorie": "Schnitt" | "Düngen" | "Winterschutz" | "Umtopfen" | "Pflege" | "Pflanzenschutz", "titel": "kurz, z. B. Rückschnitt", "von": "MM-TT", "bis": "MM-TT", "intervallTage": Zahl oder null, "hinweis": "wie genau", "material": "Einkaufsartikel oder leer"}]\n' +
+    ' "aufgaben": [{"kategorie": "Schnitt" | "Düngen" | "Winterschutz" | "Umtopfen" | "Pflege", "titel": "kurz, z. B. Rückschnitt", "von": "MM-TT", "bis": "MM-TT", "intervallTage": Zahl oder null, "hinweis": "wie genau", "material": "Einkaufsartikel oder leer"}]\n' +
     '}\n\n' +
-    'Regeln für "aufgaben": alle wiederkehrenden Arbeiten im Jahreslauf mit realistischem Zeitfenster für Deutschland (MM-TT, z. B. "03-15"). ' +
+    'Regeln für "aufgaben": nur Arbeiten, die in einem normalen Jahr ohne besondere Vorkommnisse tatsächlich erledigt werden müssen, mit realistischem Zeitfenster für Deutschland (MM-TT, z. B. "03-15"). ' +
+    'KEINE Kontroll- oder Beobachtungsaufgaben wie "auf Schädlinge prüfen", "Blätter kontrollieren" oder "Zustand beobachten" – was man im Blick behalten sollte, gehört in "schaedlinge" bzw. "tipps". ' +
     'Schnitt und Düngen haben Vorrang und sollen vollständig sein. Für regelmäßiges Düngen EINE Aufgabe über den ganzen Düngezeitraum mit "intervallTage" (mindestens 14, z. B. 14 oder 28); für einmalige Gaben intervallTage null. ' +
     'Bei Topfpflanzen draußen, die nicht im Topf überwintern können: "Ins Winterquartier räumen" und "Ausräumen" mit Zeitfenster. ' +
     'Keine Gießaufgaben. Höchstens 8 Aufgaben. "material" nur, wenn etwas gekauft werden muss (z. B. "Rosendünger").';

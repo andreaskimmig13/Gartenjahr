@@ -582,6 +582,7 @@ function pflanzeDetail(id){
   html += abschnitt('🧪','Düngen', prof.duengen);
   html += abschnitt('✂️','Schnitt', prof.schnitt);
   html += abschnitt('❄️','Winter'+(prof.frostgrenze!==null && prof.frostgrenze!==undefined ? ' · winterhart bis ca. '+prof.frostgrenze+' °C' : ''), prof.winter);
+  html += abschnitt('🐛','Schädlinge & Krankheiten', prof.schaedlinge);
   if(gift) html += '<div class="abschnitt"><h4>☠️ Giftigkeit · <span class="badge'+(gift.stufe==='ungiftig'?'':' rot')+'">'+esc(gift.stufe||'')+'</span></h4><p>'+esc(gift.text||'')+'</p></div>';
   if(Array.isArray(prof.tipps) && prof.tipps.length) html += '<div class="abschnitt"><h4>💡 Tipps</h4><p>'+prof.tipps.map(t=>'• '+esc(t)).join('\n')+'</p></div>';
   if(p.notiz) html += abschnitt('📝','Notiz', p.notiz);
