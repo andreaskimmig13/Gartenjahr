@@ -4,7 +4,7 @@
  * KI: Claude API (Schlüssel in den Skripteigenschaften).
  * Wetter: Open-Meteo (kostenlos, ohne Schlüssel).
  */
-const VERSION = '1.0.3';
+const VERSION = '1.0.4';
 const TZ = 'Europe/Berlin';
 
 const TABELLEN = {
@@ -409,7 +409,8 @@ function syncAufgaben_() {
 /** Kontroll-/Beobachtungsaufgaben gehören nicht in den Aufgabenspeicher, sondern in den Steckbrief. */
 function istKontrollaufgabe_(a) {
   if (a.kategorie === 'Pflanzenschutz') return true;
-  return /(kontroll|überprüf|prüfen|beobacht|befall|ausschau|im blick)/i.test(String(a.titel || ''));
+  const t = String(a.titel || '') + ' ' + String(a.kategorie || '');
+  return /(kontroll|prüf|pruef|check|beobacht|befall|ausschau|im blick|inspiz|untersuch|absuch|nachseh|nachschau|schädling|schaedling|krankheit|spinnmilb|läuse|laeuse|thrips|pilzbefall)/i.test(t);
 }
 
 /** IDs offener, automatisch geplanter Aufgaben, zu denen es keine Vorlage mehr gibt. */
