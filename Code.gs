@@ -4,7 +4,7 @@
  * KI: Claude API (Schlüssel in den Skripteigenschaften).
  * Wetter: Open-Meteo (kostenlos, ohne Schlüssel).
  */
-const VERSION = '1.0.10';
+const VERSION = '1.0.11';
 const TZ = 'Europe/Berlin';
 
 const TABELLEN = {
@@ -903,23 +903,39 @@ function claudeEinmal_(system, text, bildB64, maxTokens) {
   const key = prop_('CLAUDE_API_KEY');
   if (!key) throw new Error('Es ist noch kein Claude-API-Schlüssel hinterlegt (Mehr → Einstellungen).');
   const s = einstellungen_();
+  const modell = s.modell || STANDARD.modell;
   const content = [];
   if (bildB64) content.push({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: bildB64 } });
   content.push({ type: 'text', text: text });
-  const res = UrlFetchApp.fetch('https://api.anthropic.com/v1/messages', {
-    method: 'post', contentType: 'application/json', muteHttpExceptions: true,
-    headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01' },
-    payload: JSON.stringify({
-      model: s.modell || STANDARD.modell, max_tokens: maxTokens || 2000, system: system,
+  // Manche Modelle erlauben kein erzwungenes Werkzeug (tool_choice "tool"/"any").
+  // Dann ohne Zwang anfragen und das Modell per Systemhinweis aufs Werkzeug lenken.
+  const cache = CacheService.getScriptCache();
+  const ohneZwangKey = 'ohneToolZwang_' + modell;
+  let ohneZwang = cache.get(ohneZwangKey) === '1';
+  let res, code, body, msg;
+  for (let versuch = 0; versuch < 2; versuch++) {
+    const anfrage = {
+      model: modell, max_tokens: maxTokens || 2000,
+      system: ohneZwang ? system + '\n\nGib deine Antwort ausschließlich über das Werkzeug „antwort“ zurück, ohne zusätzlichen Text.' : system,
       messages: [{ role: 'user', content: content }],
       tools: [{ name: 'antwort', description: 'Gibt die Antwort als JSON-Objekt genau im verlangten Format zurück.', input_schema: { type: 'object' } }],
-      tool_choice: { type: 'tool', name: 'antwort' }
-    })
-  });
-  const code = res.getResponseCode(), body = res.getContentText();
-  if (code !== 200) {
-    let msg = body;
+      tool_choice: ohneZwang ? { type: 'auto' } : { type: 'tool', name: 'antwort' }
+    };
+    res = UrlFetchApp.fetch('https://api.anthropic.com/v1/messages', {
+      method: 'post', contentType: 'application/json', muteHttpExceptions: true,
+      headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01' },
+      payload: JSON.stringify(anfrage)
+    });
+    code = res.getResponseCode(); body = res.getContentText(); msg = body;
     try { msg = JSON.parse(body).error.message; } catch (e) { /* roh */ }
+    if (code === 400 && !ohneZwang && /tool_choice/i.test(msg)) {
+      ohneZwang = true;
+      cache.put(ohneZwangKey, '1', 21600);
+      continue;
+    }
+    break;
+  }
+  if (code !== 200) {
     if (code === 400 && /workspace/i.test(msg)) {
       throw new Error('Der API-Schlüssel ist keinem Workspace zugeordnet. Bitte in der Claude Console einen neuen Schlüssel erstellen und dabei einen Workspace (z. B. „Default“) auswählen.');
     }
