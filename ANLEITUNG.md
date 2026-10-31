@@ -23,7 +23,7 @@ Die App läuft komplett in deinem Google-Konto: Daten in einer Google-Tabelle, F
 
 ## 4. In der App
 Die App führt dich auf der Startseite durch die Schritte:
-1. **Mehr → Einstellungen:** Claude-API-Schlüssel eintragen (du kannst den aus dem Belegarchiv verwenden oder unter console.anthropic.com einen eigenen anlegen) und **Ort** suchen.
+1. **Mehr → Einstellungen:** Claude-API-Schlüssel eintragen (du kannst den aus dem Belegarchiv verwenden oder unter platform.claude.com/settings/keys einen eigenen anlegen – dabei einen Workspace auswählen) und **Ort** suchen.
 2. **Mehr → Flächen:** Bereiche anlegen. Wichtig:
    - Rasen mit Typ **Rasen** → der Rasen-Jahresplan (Düngen, Vertikutieren, Sanden, Nachsaat, Herbstdünger, Laub) wird automatisch eingeplant.
    - Zimmer mit Bereich **Drinnen**.

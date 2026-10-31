@@ -804,6 +804,9 @@ function claude_(system, text, bildB64, maxTokens) {
   if (code !== 200) {
     let msg = body;
     try { msg = JSON.parse(body).error.message; } catch (e) { /* roh */ }
+    if (code === 400 && /workspace/i.test(msg)) {
+      throw new Error('Der API-Schlüssel ist keinem Workspace zugeordnet. Bitte in der Claude Console einen neuen Schlüssel erstellen und dabei einen Workspace (z. B. „Default“) auswählen.');
+    }
     throw new Error('Claude API (' + code + '): ' + msg);
   }
   const data = JSON.parse(body);
