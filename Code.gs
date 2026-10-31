@@ -4,7 +4,7 @@
  * KI: Claude API (Schlüssel in den Skripteigenschaften).
  * Wetter: Open-Meteo (kostenlos, ohne Schlüssel).
  */
-const VERSION = '1.0.7';
+const VERSION = '1.0.8';
 const TZ = 'Europe/Berlin';
 
 const TABELLEN = {
@@ -666,12 +666,61 @@ function frostEigenSetzen_(prof, wert) {
   return prof;
 }
 
+/* ---------- Gleiche Pflanzen gleich behandeln ---------- */
+/** Art einer Pflanze: die ersten zwei Wörter des botanischen Namens (ohne Sorte), sonst der Name. */
+function art_(p, prof) {
+  const b = String(p.botanisch || (prof && prof.botanisch) || '').toLowerCase()
+    .replace(/['"‘’“”].*$/, '').replace(/[^a-zäöüß ]/g, ' ').trim().split(/\s+/).slice(0, 2).join(' ');
+  return b || String(p.name || '').toLowerCase().trim();
+}
+/** Pflanzen derselben Art mit gleicher Haltung (Topf/ausgepflanzt) und gleichem Bereich (drinnen/draußen). */
+function geschwister_(p, alle, flM) {
+  const a = art_(p, parse_(p.profil));
+  const bereich = (flM[p.flaecheId] || {}).bereich || '';
+  return alle.filter(function (x) {
+    return x.id !== p.id && x.haltung === p.haltung && ((flM[x.flaecheId] || {}).bereich || '') === bereich &&
+      art_(x, parse_(x.profil)) === a && x.profil;
+  });
+}
+/** Überträgt einen Steckbrief auf andere Pflanzen und plant deren Aufgaben neu. Ohne Sperre aufrufen innerhalb mitSperre_. */
+function steckbriefVerteilen_(profilJson, ziele) {
+  if (!ziele.length) return 0;
+  const ids = {};
+  ziele.forEach(function (x) { ids[x.id] = true; aendern_('Pflanzen', x.id, { profil: profilJson }); });
+  zeilenLoeschen_('Aufgaben', function (a) { return ids[a.bezugId] && a.quelle === 'pflanze' && a.status === 'offen'; });
+  return ziele.length;
+}
+
+function steckbriefAngleichen(quelleId) {
+  return mitSperre_(function () {
+    const alle = lesen_('Pflanzen'), flM = map_(lesen_('Flaechen'));
+    const q = alle.find(function (x) { return x.id === quelleId; });
+    if (!q || !q.profil) throw new Error('Diese Pflanze hat noch keinen Steckbrief.');
+    const n = steckbriefVerteilen_(q.profil, geschwister_(q, alle, flM));
+    syncAufgaben_();
+    return n;
+  });
+}
+
 function neuePflanze(d, foto) {
   pruefeSetup_();
   const flM = map_(lesen_('Flaechen'));
   if (!flM[d.flaecheId]) throw new Error('Bitte eine Fläche wählen.');
   if (!String(d.name || '').trim()) throw new Error('Bitte einen Namen eingeben.');
-  const prof = frostEigenSetzen_(claude_(SYS_GAERTNER, profilPrompt_(kontext_(d, flM)), null, 3000), d.frostEigen);
+  const neuDaten = { id: '_neu', name: d.name, botanisch: d.botanisch, haltung: d.haltung === 'Topf' ? 'Topf' : 'Ausgepflanzt', flaecheId: d.flaecheId, profil: '' };
+  const alle = lesen_('Pflanzen');
+  // Gibt es die Art schon gleich gehalten (und kein eigenes Vorgehen)? Dann deren Steckbrief übernehmen.
+  let vorbild = d.notiz ? null : geschwister_(neuDaten, alle, flM)[0];
+  let prof;
+  if (vorbild) prof = parse_(vorbild.profil);
+  else {
+    prof = claude_(SYS_GAERTNER, profilPrompt_(kontext_(d, flM)), null, 3000);
+    if (!d.notiz) {
+      vorbild = geschwister_(Object.assign({}, neuDaten, { botanisch: d.botanisch || prof.botanisch }), alle, flM)[0];
+      if (vorbild) prof = parse_(vorbild.profil);
+    }
+  }
+  prof = frostEigenSetzen_(prof, d.frostEigen !== undefined && d.frostEigen !== '' ? d.frostEigen : (vorbild ? prof.frostgrenzeEigen : ''));
   return mitSperre_(function () {
     const p = {
       id: id_('p'), name: String(d.name).trim(), botanisch: d.botanisch || prof.botanisch || '', sorte: d.sorte || '',
@@ -688,6 +737,7 @@ function neuePflanze(d, foto) {
 }
 
 function aenderePflanze(d, neuesProfil) {
+  // Rückgabe: { id, angeglichen } – angeglichen = Anzahl gleicher Pflanzen, die den neuen Steckbrief mitbekommen haben
   pruefeSetup_();
   const alt = finde_('Pflanzen', d.id);
   const felder = {
@@ -710,11 +760,13 @@ function aenderePflanze(d, neuesProfil) {
   }
   return mitSperre_(function () {
     const p = aendern_('Pflanzen', d.id, felder);
+    let n = 0;
     if (prof) {
       zeilenLoeschen_('Aufgaben', function (a) { return a.bezugId === p.id && a.quelle === 'pflanze' && a.status === 'offen'; });
+      n = steckbriefVerteilen_(felder.profil, geschwister_(Object.assign({}, p, { profil: felder.profil }), lesen_('Pflanzen'), map_(lesen_('Flaechen'))));
       syncAufgaben_();
     }
-    return p.id;
+    return { id: p.id, angeglichen: n };
   });
 }
 
@@ -842,7 +894,7 @@ function claude_(system, text, bildB64, maxTokens) {
   const res = UrlFetchApp.fetch('https://api.anthropic.com/v1/messages', {
     method: 'post', contentType: 'application/json', muteHttpExceptions: true,
     headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01' },
-    payload: JSON.stringify({ model: s.modell || STANDARD.modell, max_tokens: maxTokens || 2000, system: system, messages: [{ role: 'user', content: content }] })
+    payload: JSON.stringify({ model: s.modell || STANDARD.modell, max_tokens: maxTokens || 2000, temperature: 0, system: system, messages: [{ role: 'user', content: content }] })
   });
   const code = res.getResponseCode(), body = res.getContentText();
   if (code !== 200) {

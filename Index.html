@@ -535,14 +535,16 @@ async function pflanzeSpeichern(id){
   try {
     if(id){
       const neu = $('pfNeuProfil') && $('pfNeuProfil').checked;
-      neueId = await mit(neu ? 'Steckbrief wird neu erstellt …' : 'Speichere …', ()=>api('aenderePflanze', d, neu));
+      const r = await mit(neu ? 'Steckbrief wird neu erstellt …' : 'Speichere …', ()=>api('aenderePflanze', d, neu));
+      neueId = r.id; if(r.angeglichen) S.tmp.angeglichen = r.angeglichen;
     } else {
       neueId = await mit('Steckbrief und Pflegeplan werden erstellt …', ()=>api('neuePflanze', d, S.tmp.formFoto));
     }
   } catch(e){ return; }
   await neuLaden(true);
   pflanzeDetail(neueId);
-  toast('Gespeichert');
+  toast(S.tmp.angeglichen ? 'Gespeichert – auch bei '+S.tmp.angeglichen+' gleicher Pflanze(n) übernommen' : 'Gespeichert');
+  S.tmp.angeglichen = 0;
 }
 function standortAmpel(p, prof){
   const f = aktuelleFlaeche(p);
@@ -576,6 +578,10 @@ function pflanzeDetail(id){
       '<button onclick="aufgabeForm({bezugId:\''+id+'\'})"><span>➕</span>Aufgabe</button>'+
       '<button onclick="pflanzeBearbeiten(\''+id+'\')"><span>✏️</span>Bearbeiten</button>'+
     '</div>';
+  const gleiche = geschwister(p).filter(x=>x.profil !== p.profil);
+  if(p.prof && gleiche.length) html += '<div class="hinweis h-info"><div class="titel">ℹ️ Gleiche Pflanze mit anderem Pflegeplan</div>'+
+    '<div class="sub">'+gleiche.map(x=>esc(x.name)+' ('+esc((S.flM[x.flaecheId]||{}).name||'')+')').join(', ')+' – gleiche Art, gleich gehalten, aber abweichender Steckbrief.</div>'+
+    '<button class="knopf klein" style="margin-top:8px" onclick="angleichen(\''+id+'\')">Diesen Steckbrief für alle verwenden</button></div>';
   if(!p.prof) html += '<div class="hinweis h-info"><div class="titel">ℹ️ Noch kein Steckbrief</div><button class="knopf klein" style="margin-top:6px" onclick="steckbriefNeu(\''+id+'\')">Jetzt erstellen</button></div>';
   html += abschnitt('📖','Kurzinfo', prof.kurzinfo);
   if(prof.standortHinweis || prof.licht) html += '<div class="abschnitt"><h4>☀️ Standort</h4>'+standortAmpel(p, prof)+
@@ -690,11 +696,25 @@ async function standortWechsel(id){
   await mit('Speichere …', ()=>api('pflanzeStandort', id, neu));
   await neuLaden(true); pflanzeDetail(id); toast(neu==='Winter'?'Im Winterquartier ❄️':'Wieder draußen ☀️');
 }
+function art(p){
+  const b = String(p.botanisch || (p.prof && p.prof.botanisch) || '').toLowerCase()
+    .replace(/['"‘’“”].*$/, '').replace(/[^a-zäöüß ]/g, ' ').trim().split(/\s+/).slice(0, 2).join(' ');
+  return b || String(p.name || '').toLowerCase().trim();
+}
+function geschwister(p){
+  const bereich = (S.flM[p.flaecheId]||{}).bereich || '';
+  return S.d.pflanzen.filter(x => x.id!==p.id && x.haltung===p.haltung && ((S.flM[x.flaecheId]||{}).bereich||'')===bereich && art(x)===art(p) && x.profil);
+}
+async function angleichen(id){
+  let n; try { n = await mit('Gleiche Pflanzen werden angeglichen …', ()=>api('steckbriefAngleichen', id)); } catch(e){ return; }
+  await neuLaden(true); pflanzeDetail(id); toast('Bei '+n+' Pflanze(n) übernommen');
+}
 function pflanzeBearbeiten(id){ const p=S.pfM[id]; pflanzeForm(p, null, id); }
 async function steckbriefNeu(id){
   if(!confirm('Steckbrief und Pflegeplan neu von der KI erstellen lassen? Offene geplante Aufgaben dieser Pflanze werden ersetzt.')) return;
-  try { await mit('Steckbrief wird neu erstellt …', ()=>api('neuerSteckbrief', id)); } catch(e){ return; }
-  await neuLaden(true); pflanzeDetail(id); toast('Steckbrief aktualisiert');
+  let r; try { r = await mit('Steckbrief wird neu erstellt …', ()=>api('neuerSteckbrief', id)); } catch(e){ return; }
+  await neuLaden(true); pflanzeDetail(id);
+  toast(r && r.angeglichen ? 'Steckbrief aktualisiert – auch bei '+r.angeglichen+' gleicher Pflanze(n)' : 'Steckbrief aktualisiert');
 }
 async function pflanzeLoeschen(id){
   if(!confirm('„'+S.pfM[id].name+'“ mit allen Fotos und offenen Aufgaben löschen?')) return;
