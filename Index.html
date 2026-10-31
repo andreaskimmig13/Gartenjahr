@@ -511,14 +511,19 @@ async function fotoBestimmen(){
   try { foto = await fotoHolen(1600); } catch(e){ return fehler(e); }
   if(!foto) return;
   S.tmp.foto = foto;
+  bestimmen('');
+}
+async function bestimmen(vermutung){
+  const foto = S.tmp.foto;
   let r;
-  try { r = await mit('Die KI bestimmt die Pflanze …', ()=>api('bestimmeFoto', foto.bild)); } catch(e){ return; }
+  try { r = await mit('Die KI bestimmt die Pflanze …', ()=>api('bestimmeFoto', foto.bild, vermutung)); } catch(e){ return; }
   const k = (r && r.kandidaten) || [];
   S.tmp.kandidaten = k;
   sheet('Was ist das?',
     '<img class="hero" src="'+esc(foto.bild)+'" style="max-height:220px;object-fit:contain">'+
     (k.length ? '<div class="karte" style="margin-top:12px">'+k.map((c,i)=>'<div class="zeile" onclick="kandidatWaehlen('+i+')"><div class="mitte"><div class="titel">'+esc(c.name)+' <span class="badge'+(c.sicherheit>=70?'':' gelb')+'">'+Math.round(c.sicherheit||0)+' %</span></div><div class="sub"><i>'+esc(c.botanisch||'')+'</i>'+(c.sorte?' · '+esc(c.sorte):'')+'</div><div class="sub">'+esc(c.merkmale||'')+'</div></div><span>›</span></div>').join('')+'</div>' : '<div class="leer">Keine Pflanze erkannt.</div>')+
     (r && r.hinweis ? '<p class="sub" style="margin-top:10px">💡 '+esc(r.hinweis)+'</p>' : '')+
+    '<div class="abschnitt"><h4>🤔 Nicht dabei?</h4><div class="reihe"><input class="suche" id="vermutung" placeholder="Deine Vermutung, z. B. Zypresse" value="'+esc(vermutung||'')+'" style="flex:1"><button class="knopf" style="flex:none" onclick="bestimmen(feld(\'vermutung\'))">Prüfen</button></div></div>'+
     '<div class="reihe" style="margin-top:14px"><button class="knopf zwei" onclick="fotoBestimmen()">Anderes Foto</button><button class="knopf zwei" onclick="pflanzeForm({flaecheId:S.tmp.flaecheId}, S.tmp.foto)">Name selbst eingeben</button></div>');
 }
 function kandidatWaehlen(i){

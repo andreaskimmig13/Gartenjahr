@@ -4,7 +4,7 @@
  * KI: Claude API (Schlüssel in den Skripteigenschaften).
  * Wetter: Open-Meteo (kostenlos, ohne Schlüssel).
  */
-const VERSION = '1.0.9';
+const VERSION = '1.0.10';
 const TZ = 'Europe/Berlin';
 
 const TABELLEN = {
@@ -714,7 +714,7 @@ function neuePflanze(d, foto) {
   let prof;
   if (vorbild) prof = parse_(vorbild.profil);
   else {
-    prof = claude_(SYS_GAERTNER, profilPrompt_(kontext_(d, flM)), null, 3000);
+    prof = claude_(SYS_GAERTNER, profilPrompt_(kontext_(d, flM)), null, 4000);
     if (!d.notiz) {
       vorbild = geschwister_(Object.assign({}, neuDaten, { botanisch: d.botanisch || prof.botanisch }), alle, flM)[0];
       if (vorbild) prof = parse_(vorbild.profil);
@@ -753,7 +753,7 @@ function aenderePflanze(d, neuesProfil) {
   const frostEigen = d.frostEigen !== undefined ? d.frostEigen : (altProf.frostgrenzeEigen === undefined ? '' : altProf.frostgrenzeEigen);
   if (neuesProfil) {
     const flM = map_(lesen_('Flaechen'));
-    prof = claude_(SYS_GAERTNER, profilPrompt_(kontext_(Object.assign({}, alt, felder, { frostEigen: frostEigen }), flM)), null, 3000);
+    prof = claude_(SYS_GAERTNER, profilPrompt_(kontext_(Object.assign({}, alt, felder, { frostEigen: frostEigen }), flM)), null, 4000);
     felder.profil = JSON.stringify(frostEigenSetzen_(prof, frostEigen));
   } else if (alt.profil) {
     felder.profil = JSON.stringify(frostEigenSetzen_(altProf, frostEigen));
@@ -814,13 +814,19 @@ function fotoSpeichern_(p, foto, art, notiz, extra) {
   return f;
 }
 
-function bestimmeFoto(bild) {
+function bestimmeFoto(bild, vermutung) {
+  vermutung = String(vermutung || '').trim();
   return claude_(
     'Du bist Botaniker und Gärtnermeister in Deutschland. Antworte ausschließlich mit gültigem JSON.',
-    'Bestimme die Pflanze auf dem Foto (Garten- oder Zimmerpflanze in Deutschland). Antworte NUR mit JSON:\n' +
+    'Bestimme die Pflanze auf dem Foto (Garten- oder Zimmerpflanze in Deutschland). ' +
+    'Achte auf typische Verwechslungen und unterscheide sorgfältig anhand der sichtbaren Merkmale, z. B. bei Nadelgehölzen ' +
+    'Zypresse (Cupressus), Leyland-Zypresse (× Cuprocyparis leylandii), Scheinzypresse (Chamaecyparis), Thuja, Wacholder und Eibe ' +
+    '(Wuchsform, Schuppen- oder Nadelblätter, Zweigstellung, Zapfen). Gartenformen und Sorten sind häufig – ziehe sie in Betracht.\n' +
+    (vermutung ? 'Der Besitzer vermutet: „' + vermutung + '“. Prüfe das am Foto. Passt es grundsätzlich, nenne diese Pflanze bzw. die passende Art/Gattung als ersten Kandidaten und präzisiere sie; widerspricht das Foto klar, sage es im Hinweis.\n' : '') +
+    'Antworte NUR mit JSON:\n' +
     '{"kandidaten":[{"name":"deutscher Name","botanisch":"botanischer Name","sorte":"falls sicher erkennbar, sonst leer","sicherheit":Zahl 0–100,"merkmale":"woran erkannt, 1 Satz"}],"hinweis":"was ein besseres Foto zeigen sollte, sonst leer"}\n' +
-    'Höchstens 3 Kandidaten, der wahrscheinlichste zuerst. Ist keine Pflanze erkennbar, bleibt "kandidaten" leer.',
-    b64_(bild), 900);
+    'Höchstens 4 Kandidaten, der wahrscheinlichste zuerst. Ist keine Pflanze erkennbar, bleibt "kandidaten" leer.',
+    b64_(bild), 1200);
 }
 
 function fotoHinzufuegen(pflanzeId, foto, notiz) {
@@ -884,7 +890,16 @@ function loescheFoto(fotoId) {
 }
 
 /** Aufruf der Claude API. Gibt das JSON-Objekt aus der Antwort zurück. */
+/** Aufruf der Claude API. Die Antwort kommt über ein Werkzeug als garantiert gültiges JSON-Objekt. */
 function claude_(system, text, bildB64, maxTokens) {
+  try { return claudeEinmal_(system, text, bildB64, maxTokens); }
+  catch (e) {
+    if (e && e.wiederholen) return claudeEinmal_(system, text, bildB64, Math.round((maxTokens || 2000) * 1.5));
+    throw e;
+  }
+}
+
+function claudeEinmal_(system, text, bildB64, maxTokens) {
   const key = prop_('CLAUDE_API_KEY');
   if (!key) throw new Error('Es ist noch kein Claude-API-Schlüssel hinterlegt (Mehr → Einstellungen).');
   const s = einstellungen_();
@@ -894,7 +909,12 @@ function claude_(system, text, bildB64, maxTokens) {
   const res = UrlFetchApp.fetch('https://api.anthropic.com/v1/messages', {
     method: 'post', contentType: 'application/json', muteHttpExceptions: true,
     headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01' },
-    payload: JSON.stringify({ model: s.modell || STANDARD.modell, max_tokens: maxTokens || 2000, system: system, messages: [{ role: 'user', content: content }] })
+    payload: JSON.stringify({
+      model: s.modell || STANDARD.modell, max_tokens: maxTokens || 2000, system: system,
+      messages: [{ role: 'user', content: content }],
+      tools: [{ name: 'antwort', description: 'Gibt die Antwort als JSON-Objekt genau im verlangten Format zurück.', input_schema: { type: 'object' } }],
+      tool_choice: { type: 'tool', name: 'antwort' }
+    })
   });
   const code = res.getResponseCode(), body = res.getContentText();
   if (code !== 200) {
@@ -903,11 +923,21 @@ function claude_(system, text, bildB64, maxTokens) {
     if (code === 400 && /workspace/i.test(msg)) {
       throw new Error('Der API-Schlüssel ist keinem Workspace zugeordnet. Bitte in der Claude Console einen neuen Schlüssel erstellen und dabei einen Workspace (z. B. „Default“) auswählen.');
     }
-    throw new Error('Claude API (' + code + '): ' + msg);
+    const fehler = new Error('Claude API (' + code + '): ' + msg);
+    fehler.wiederholen = code === 529 || code >= 500;
+    throw fehler;
   }
   const data = JSON.parse(body);
+  const werkzeug = (data.content || []).filter(function (c) { return c.type === 'tool_use'; })[0];
+  if (data.stop_reason === 'max_tokens') {
+    const f = new Error('Die KI-Antwort war zu lang und wurde abgeschnitten. Bitte noch einmal versuchen.');
+    f.wiederholen = true; throw f;
+  }
+  if (werkzeug && werkzeug.input && Object.keys(werkzeug.input).length) return werkzeug.input;
+  // Rückfall: JSON aus Text lesen
   const out = (data.content || []).filter(function (c) { return c.type === 'text'; }).map(function (c) { return c.text; }).join('');
-  return jsonAus_(out);
+  try { return jsonAus_(out); }
+  catch (e) { const f = new Error('Die KI-Antwort war nicht lesbar. Bitte noch einmal versuchen.'); f.wiederholen = true; throw f; }
 }
 
 function jsonAus_(t) {
