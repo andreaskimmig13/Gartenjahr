@@ -31,6 +31,9 @@ html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font:15px/
 .knopf.zwei{background:transparent;color:var(--gruen);border:1px solid var(--linie)}
 input{width:100%;max-width:420px;padding:11px 12px;border-radius:10px;border:1px solid var(--linie);background:var(--karte);color:var(--text);font:inherit}
 .versteckt{display:none!important}
+#leiste{position:fixed;z-index:5;left:12px;right:12px;bottom:calc(76px + env(safe-area-inset-bottom));display:flex;gap:8px;align-items:center;background:var(--karte);border:1px solid var(--linie);border-radius:12px;padding:8px 10px;box-shadow:0 2px 10px rgba(0,0,0,.15);font-size:14px}
+#leiste span{flex:1}
+#leiste .knopf{padding:7px 12px}
 .punkte span{display:inline-block;width:8px;height:8px;margin:0 3px;border-radius:50%;background:var(--gruen);opacity:.3;animation:p 1.2s infinite}
 .punkte span:nth-child(2){animation-delay:.2s}.punkte span:nth-child(3){animation-delay:.4s}
 @keyframes p{50%{opacity:1}}
@@ -65,6 +68,8 @@ input{width:100%;max-width:420px;padding:11px 12px;border-radius:10px;border:1px
   <p class="leise" id="fehler"></p>
 </div>
 
+<div id="leiste" class="versteckt"><span>Lädt die App nicht?</span><a class="knopf" id="direkt2" href="#">Direkt öffnen</a><button class="knopf zwei" onclick="document.getElementById('leiste').classList.add('versteckt')">✕</button></div>
+
 <iframe id="app" title="Gartenjahr" allow="camera; geolocation; clipboard-write"></iframe>
 
 <script>
@@ -85,19 +90,22 @@ var APP = FEST_URL || lies('gj_url');
 
 function starten(){
   document.getElementById('direkt').href = APP;
+  document.getElementById('direkt2').href = APP;
   if (lies('gj_modus') === 'direkt') { location.replace(APP); return; }
   zeige('laden');
   var frame = document.getElementById('app');
   var bereit = false;
   window.addEventListener('message', function(e){
-    if (e.data === 'gartenjahr:bereit' && /(^https:\/\/script\.google\.com$)|(\.googleusercontent\.com$)/.test(e.origin)) {
+    if (e.data === 'gartenjahr:bereit') {
       bereit = true;
       frame.classList.add('da');
       zeige(null);
+      document.getElementById('leiste').classList.add('versteckt');
     }
   });
   frame.src = APP;
-  setTimeout(function(){ if (!bereit) zeige('problem'); }, 15000);
+  // Kein Signal? App trotzdem zeigen und dezent „Direkt öffnen“ anbieten
+  setTimeout(function(){ if (!bereit) { frame.classList.add('da'); zeige(null); document.getElementById('leiste').classList.remove('versteckt'); } }, 8000);
   document.getElementById('immerDirekt').onclick = function(){ schreib('gj_modus','direkt'); location.replace(APP); };
 }
 
