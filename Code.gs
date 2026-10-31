@@ -4,7 +4,7 @@
  * KI: Claude API (Schlüssel in den Skripteigenschaften).
  * Wetter: Open-Meteo (kostenlos, ohne Schlüssel).
  */
-const VERSION = '1.0.12';
+const VERSION = '1.0.13';
 const TZ = 'Europe/Berlin';
 
 const TABELLEN = {
@@ -214,6 +214,25 @@ function sauber_(o) { const c = {}; Object.keys(o).forEach(function (k) { if (k 
 function map_(arr) { const m = {}; arr.forEach(function (x) { m[x.id] = x; }); return m; }
 function id_(p) { return p + Utilities.getUuid().replace(/-/g, '').slice(0, 10); }
 function parse_(s) { if (!s) return null; try { return JSON.parse(s); } catch (e) { return null; } }
+/** Ist das ein brauchbarer Steckbrief? */
+function profilGueltig_(o) {
+  return !!(o && typeof o === 'object' && !Array.isArray(o) && (o.schnitt || o.kurzinfo || o.duengen || Array.isArray(o.aufgaben)));
+}
+/** Holt einen Steckbrief auch aus verpackten KI-Antworten wie {"antwort":{…}} oder {"json":"{…}"}. */
+function entpacke_(o, tiefe) {
+  tiefe = tiefe || 0;
+  if (profilGueltig_(o)) return o;
+  if (typeof o === 'string') { try { return entpacke_(jsonAus_(o), tiefe + 1); } catch (e) { return null; } }
+  if (!o || typeof o !== 'object' || tiefe > 3) return null;
+  const werte = Array.isArray(o) ? o : Object.keys(o).map(function (k) { return o[k]; });
+  for (let i = 0; i < werte.length; i++) {
+    const r = entpacke_(werte[i], tiefe + 1);
+    if (r) return r;
+  }
+  return null;
+}
+/** Steckbrief einer Pflanze lesen – null, wenn keiner oder unbrauchbar. */
+function profil_(s) { return entpacke_(parse_(s)); }
 function bool_(v) { return v === true || v === 'true' || v === 1 || v === '1'; }
 
 function mitSperre_(fn) {
@@ -323,6 +342,17 @@ function sucheOrt(name) {
   });
 }
 
+/** Verpackte Steckbriefe auspacken, unbrauchbare leeren (dann bietet die App „Jetzt erstellen“ an). */
+function steckbriefeReparieren_() {
+  lesen_('Pflanzen').forEach(function (p) {
+    if (!p.profil) return;
+    const roh = parse_(p.profil);
+    if (profilGueltig_(roh)) return;
+    const prof = entpacke_(roh);
+    aendern_('Pflanzen', p.id, { profil: prof ? JSON.stringify(prof) : '' });
+  });
+}
+
 /* ============================================================
  * Laden
  * ============================================================ */
@@ -330,6 +360,7 @@ function ladeAlles() {
   pruefeSetup_();
   const letzter = Number(prop_('LAST_SYNC') || 0);
   if (Date.now() - letzter > 6 * 3600 * 1000 || prop_('SYNC_VERSION') !== VERSION) {
+    if (prop_('SYNC_VERSION') !== VERSION) mitSperre_(steckbriefeReparieren_);
     mitSperre_(syncAufgaben_);
     PropertiesService.getScriptProperties().setProperty('SYNC_VERSION', VERSION);
   }
@@ -364,7 +395,7 @@ function vorlagen_() {
   const s = einstellungen_();
   const v = [];
   lesen_('Pflanzen').forEach(function (p) {
-    const prof = parse_(p.profil);
+    const prof = profil_(p.profil);
     if (!prof || !Array.isArray(prof.aufgaben)) return;
     prof.aufgaben.forEach(function (a) {
       if (!a || !a.titel || istKontrollaufgabe_(a)) return;
@@ -660,6 +691,15 @@ function profilPrompt_(k) {
     'Keine Gießaufgaben. Höchstens 8 Aufgaben. "material" nur, wenn etwas gekauft werden muss (z. B. "Rosendünger").';
 }
 
+/** Steckbrief von der KI holen und prüfen – unbrauchbare Antworten werden nicht gespeichert. */
+function steckbriefKi_(k) {
+  for (let versuch = 0; versuch < 2; versuch++) {
+    const prof = entpacke_(claude_(SYS_GAERTNER, profilPrompt_(k), null, 4000));
+    if (prof) return prof;
+  }
+  throw new Error('Die KI hat keinen brauchbaren Steckbrief geliefert. Bitte noch einmal versuchen.');
+}
+
 function frostEigenSetzen_(prof, wert) {
   if (wert === '' || wert === null || wert === undefined || isNaN(Number(wert))) delete prof.frostgrenzeEigen;
   else prof.frostgrenzeEigen = Number(wert);
@@ -675,11 +715,11 @@ function art_(p, prof) {
 }
 /** Pflanzen derselben Art mit gleicher Haltung (Topf/ausgepflanzt) und gleichem Bereich (drinnen/draußen). */
 function geschwister_(p, alle, flM) {
-  const a = art_(p, parse_(p.profil));
+  const a = art_(p, profil_(p.profil));
   const bereich = (flM[p.flaecheId] || {}).bereich || '';
   return alle.filter(function (x) {
     return x.id !== p.id && x.haltung === p.haltung && ((flM[x.flaecheId] || {}).bereich || '') === bereich &&
-      art_(x, parse_(x.profil)) === a && x.profil;
+      art_(x, profil_(x.profil)) === a && profilGueltig_(profil_(x.profil));
   });
 }
 /** Überträgt einen Steckbrief auf andere Pflanzen und plant deren Aufgaben neu. Ohne Sperre aufrufen innerhalb mitSperre_. */
@@ -712,12 +752,12 @@ function neuePflanze(d, foto) {
   // Gibt es die Art schon gleich gehalten (und kein eigenes Vorgehen)? Dann deren Steckbrief übernehmen.
   let vorbild = d.notiz ? null : geschwister_(neuDaten, alle, flM)[0];
   let prof;
-  if (vorbild) prof = parse_(vorbild.profil);
+  if (vorbild) prof = profil_(vorbild.profil);
   else {
-    prof = claude_(SYS_GAERTNER, profilPrompt_(kontext_(d, flM)), null, 4000);
+    prof = steckbriefKi_(kontext_(d, flM));
     if (!d.notiz) {
       vorbild = geschwister_(Object.assign({}, neuDaten, { botanisch: d.botanisch || prof.botanisch }), alle, flM)[0];
-      if (vorbild) prof = parse_(vorbild.profil);
+      if (vorbild) prof = profil_(vorbild.profil);
     }
   }
   prof = frostEigenSetzen_(prof, d.frostEigen !== undefined && d.frostEigen !== '' ? d.frostEigen : (vorbild ? prof.frostgrenzeEigen : ''));
@@ -749,11 +789,11 @@ function aenderePflanze(d, neuesProfil) {
   felder.kreisId = felder.bewaesserung === 'Automatisch' ? (d.kreisId || '') : '';
   if (felder.haltung !== 'Topf') felder.standort = 'Sommer';
   let prof = null;
-  const altProf = parse_(alt.profil) || {};
+  const altProf = profil_(alt.profil) || {};
   const frostEigen = d.frostEigen !== undefined ? d.frostEigen : (altProf.frostgrenzeEigen === undefined ? '' : altProf.frostgrenzeEigen);
   if (neuesProfil) {
     const flM = map_(lesen_('Flaechen'));
-    prof = claude_(SYS_GAERTNER, profilPrompt_(kontext_(Object.assign({}, alt, felder, { frostEigen: frostEigen }), flM)), null, 4000);
+    prof = steckbriefKi_(kontext_(Object.assign({}, alt, felder, { frostEigen: frostEigen }), flM));
     felder.profil = JSON.stringify(frostEigenSetzen_(prof, frostEigen));
   } else if (alt.profil) {
     felder.profil = JSON.stringify(frostEigenSetzen_(altProf, frostEigen));
@@ -838,7 +878,7 @@ function fotoHinzufuegen(pflanzeId, foto, notiz) {
 
 function pruefeFoto(pflanzeId, foto, notiz) {
   const p = finde_('Pflanzen', pflanzeId);
-  const prof = parse_(p.profil) || {};
+  const prof = profil_(p.profil) || {};
   const flM = map_(lesen_('Flaechen'));
   const f = flM[p.standort === 'Winter' && p.winterFlaecheId ? p.winterFlaecheId : p.flaecheId] || {};
   const vorher = lesen_('Fotos').filter(function (x) { return x.pflanzeId === pflanzeId && x.art === 'Check'; }).pop();
@@ -1004,7 +1044,7 @@ function berechneHinweise_(fl, pf, tage, s, heute, aufgaben, hatKreise) {
   const flM = map_(fl);
   const liste = pf.map(function (p) {
     const f = flM[p.standort === 'Winter' && p.winterFlaecheId ? p.winterFlaecheId : p.flaecheId];
-    return { p: p, prof: parse_(p.profil), f: f, imWinter: p.standort === 'Winter' };
+    return { p: p, prof: profil_(p.profil), f: f, imWinter: p.standort === 'Winter' };
   });
   const draussen = liste.filter(function (x) { return x.f && x.f.bereich !== 'Drinnen' && !(x.imWinter && !x.p.winterFlaecheId); });
 

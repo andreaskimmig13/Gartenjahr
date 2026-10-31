@@ -216,7 +216,7 @@ function index(){
   const d = S.d;
   S.flM = Object.fromEntries(d.flaechen.map(f=>[f.id,f]));
   S.pfM = {};
-  d.pflanzen.forEach(p => { try { p.prof = p.profil ? JSON.parse(p.profil) : null; } catch(e){ p.prof = null; } S.pfM[p.id]=p; });
+  d.pflanzen.forEach(p => { try { p.prof = p.profil ? JSON.parse(p.profil) : null; } catch(e){ p.prof = null; } if(p.prof && !(p.prof.schnitt||p.prof.kurzinfo||p.prof.duengen||Array.isArray(p.prof.aufgaben))) p.prof = null; S.pfM[p.id]=p; });
   S.krM = Object.fromEntries(d.kreise.map(k=>[k.id,k]));
   d.flaechen.sort((a,b)=> (a.bereich===b.bereich ? a.name.localeCompare(b.name,'de') : (a.bereich==='Draußen'?-1:1)));
   d.pflanzen.sort((a,b)=> a.name.localeCompare(b.name,'de'));
@@ -749,7 +749,7 @@ function art(p){
 }
 function geschwister(p){
   const bereich = (S.flM[p.flaecheId]||{}).bereich || '';
-  return S.d.pflanzen.filter(x => x.id!==p.id && x.haltung===p.haltung && ((S.flM[x.flaecheId]||{}).bereich||'')===bereich && art(x)===art(p) && x.profil);
+  return S.d.pflanzen.filter(x => x.id!==p.id && x.haltung===p.haltung && ((S.flM[x.flaecheId]||{}).bereich||'')===bereich && art(x)===art(p) && x.prof);
 }
 async function angleichen(id){
   let n; try { n = await mit('Gleiche Pflanzen werden angeglichen …', ()=>api('steckbriefAngleichen', id)); } catch(e){ return; }
