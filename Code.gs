@@ -4,7 +4,7 @@
  * KI: Claude API (Schlüssel in den Skripteigenschaften).
  * Wetter: Open-Meteo (kostenlos, ohne Schlüssel).
  */
-const VERSION = '1.0.5';
+const VERSION = '1.0.6';
 const TZ = 'Europe/Berlin';
 
 const TABELLEN = {
@@ -609,7 +609,8 @@ function kontext_(d, flM) {
   return {
     name: d.name, botanisch: d.botanisch, sorte: d.sorte, haltung: d.haltung, bewaesserung: d.bewaesserung,
     bereich: f.bereich, licht: f.licht, boden: f.boden, flaeche: f.name, flaecheTyp: f.typ,
-    winterquartier: w ? w.name + ' (' + (w.bereich === 'Drinnen' ? 'drinnen' : 'draußen') + (w.licht ? ', ' + w.licht : '') + ')' : ''
+    winterquartier: w ? w.name + ' (' + (w.bereich === 'Drinnen' ? 'drinnen' : 'draußen') + (w.licht ? ', ' + w.licht : '') + ')' : '',
+    notiz: d.notiz || '', frostEigen: (d.frostEigen === '' || d.frostEigen === null || d.frostEigen === undefined) ? '' : d.frostEigen
   };
 }
 
@@ -621,7 +622,10 @@ function profilPrompt_(k) {
     'Standort: ' + (k.bereich === 'Drinnen' ? 'drinnen (Zimmerpflanze)' : 'draußen') +
     (k.flaecheTyp ? ', Flächentyp: ' + k.flaecheTyp : '') + (k.licht ? ', Licht: ' + k.licht : '') + (k.boden ? ', Boden: ' + k.boden : '') + '\n' +
     'Haltung: ' + (k.haltung === 'Topf' ? 'im Topf/Kübel' : 'ausgepflanzt') + '\n' +
-    (k.winterquartier ? 'Winterquartier: ' + k.winterquartier + '\n' : '') +
+    (k.winterquartier ? 'Winterquartier: ' + k.winterquartier + '\n' :
+      (k.haltung === 'Topf' && k.bereich !== 'Drinnen' ? 'Winterquartier: keins – die Pflanze bleibt im Winter draußen.\n' : '')) +
+    (k.frostEigen !== '' ? 'Erfahrung des Besitzers: hält bei ihm bis ca. ' + k.frostEigen + ' °C aus.\n' : '') +
+    (k.notiz ? 'Vorgehen und Hinweise des Besitzers (haben Vorrang vor allgemeinen Empfehlungen, Aufgaben danach ausrichten): ' + k.notiz + '\n' : '') +
     'Bewässerung: ' + (k.bewaesserung === 'Automatisch' ? 'automatische Bewässerung (Tropfer) vorhanden' : 'wird von Hand gegossen') + '\n\n' +
     'Antworte NUR mit JSON in genau diesem Format:\n' +
     '{\n' +
@@ -648,8 +652,15 @@ function profilPrompt_(k) {
     'Regeln für "aufgaben": nur Arbeiten, die in einem normalen Jahr ohne besondere Vorkommnisse tatsächlich erledigt werden müssen, mit realistischem Zeitfenster für Deutschland (MM-TT, z. B. "03-15"). ' +
     'KEINE Kontroll- oder Beobachtungsaufgaben wie "auf Schädlinge prüfen", "Blätter kontrollieren" oder "Zustand beobachten" – was man im Blick behalten sollte, gehört in "schaedlinge" bzw. "tipps". ' +
     'Schnitt und Düngen haben Vorrang und sollen vollständig sein. Für regelmäßiges Düngen EINE Aufgabe über den ganzen Düngezeitraum mit "intervallTage" (mindestens 14, z. B. 14 oder 28); für einmalige Gaben intervallTage null. ' +
-    'Bei Topfpflanzen draußen, die nicht im Topf überwintern können: "Ins Winterquartier räumen" und "Ausräumen" mit Zeitfenster. ' +
+    'Bei Topfpflanzen mit Winterquartier: "Ins Winterquartier räumen" und "Ausräumen" mit Zeitfenster. Bleibt die Pflanze im Winter draußen, KEIN "Ins Winterquartier", sondern die nötigen Winterschutz-Maßnahmen am Standort und deren Abbau im Frühjahr. ' +
+    'Hat der Besitzer sein Vorgehen beschrieben, plane genau dieses Vorgehen ein (mit passenden Zeitfenstern) statt allgemeiner Empfehlungen. ' +
     'Keine Gießaufgaben. Höchstens 8 Aufgaben. "material" nur, wenn etwas gekauft werden muss (z. B. "Rosendünger").';
+}
+
+function frostEigenSetzen_(prof, wert) {
+  if (wert === '' || wert === null || wert === undefined || isNaN(Number(wert))) delete prof.frostgrenzeEigen;
+  else prof.frostgrenzeEigen = Number(wert);
+  return prof;
 }
 
 function neuePflanze(d, foto) {
@@ -657,7 +668,7 @@ function neuePflanze(d, foto) {
   const flM = map_(lesen_('Flaechen'));
   if (!flM[d.flaecheId]) throw new Error('Bitte eine Fläche wählen.');
   if (!String(d.name || '').trim()) throw new Error('Bitte einen Namen eingeben.');
-  const prof = claude_(SYS_GAERTNER, profilPrompt_(kontext_(d, flM)), null, 3000);
+  const prof = frostEigenSetzen_(claude_(SYS_GAERTNER, profilPrompt_(kontext_(d, flM)), null, 3000), d.frostEigen);
   return mitSperre_(function () {
     const p = {
       id: id_('p'), name: String(d.name).trim(), botanisch: d.botanisch || prof.botanisch || '', sorte: d.sorte || '',
@@ -685,10 +696,14 @@ function aenderePflanze(d, neuesProfil) {
   felder.kreisId = felder.bewaesserung === 'Automatisch' ? (d.kreisId || '') : '';
   if (felder.haltung !== 'Topf') felder.standort = 'Sommer';
   let prof = null;
+  const altProf = parse_(alt.profil) || {};
+  const frostEigen = d.frostEigen !== undefined ? d.frostEigen : (altProf.frostgrenzeEigen === undefined ? '' : altProf.frostgrenzeEigen);
   if (neuesProfil) {
     const flM = map_(lesen_('Flaechen'));
-    prof = claude_(SYS_GAERTNER, profilPrompt_(kontext_(Object.assign({}, alt, felder), flM)), null, 3000);
-    felder.profil = JSON.stringify(prof);
+    prof = claude_(SYS_GAERTNER, profilPrompt_(kontext_(Object.assign({}, alt, felder, { frostEigen: frostEigen }), flM)), null, 3000);
+    felder.profil = JSON.stringify(frostEigenSetzen_(prof, frostEigen));
+  } else if (alt.profil) {
+    felder.profil = JSON.stringify(frostEigenSetzen_(altProf, frostEigen));
   }
   return mitSperre_(function () {
     const p = aendern_('Pflanzen', d.id, felder);
@@ -894,15 +909,17 @@ function berechneHinweise_(fl, pf, tage, s, heute, aufgaben, hatKreise) {
       draussen.forEach(function (x) {
         if (!x.prof) return;
         const topf = x.p.haltung === 'Topf';
-        let g = x.prof.frostgrenze;
+        const eigen = x.prof.frostgrenzeEigen !== undefined && x.prof.frostgrenzeEigen !== null;
+        let g = eigen ? x.prof.frostgrenzeEigen : x.prof.frostgrenze;
         if (g === null || g === undefined || g === '' || isNaN(Number(g))) {
           if (!x.prof.frostempfindlich) return;
           g = 0;
         }
-        g = Number(g) + (topf ? 5 : 0); // Wurzeln im Topf frieren deutlich früher
+        g = Number(g) + (topf && !eigen ? 5 : 0); // Wurzeln im Topf frieren früher (eigene Angabe gilt so, wie die Pflanze steht)
         if (kalt.min > g + 1) return;
         let m;
-        if (topf) m = x.p.winterFlaecheId && !x.imWinter ? 'Ins Winterquartier (' + ((flM[x.p.winterFlaecheId] || {}).name || '') + ') räumen' : 'Reinholen oder Topf einpacken und geschützt stellen';
+        if (topf && x.p.winterFlaecheId && !x.imWinter) m = 'Ins Winterquartier (' + ((flM[x.p.winterFlaecheId] || {}).name || '') + ') räumen';
+        else if (topf) m = x.prof.winterschutz || 'Topf einpacken und geschützt stellen';
         else m = x.prof.winterschutz || 'Mit Vlies abdecken';
         betr.push({ id: x.p.id, name: x.p.name, flaeche: x.f.name, massnahme: m });
       });

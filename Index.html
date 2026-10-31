@@ -485,7 +485,7 @@ async function fotoBestimmen(){
   const k = (r && r.kandidaten) || [];
   S.tmp.kandidaten = k;
   sheet('Was ist das?',
-    '<img class="hero" src="'+esc(foto.thumb)+'" style="max-height:180px">'+
+    '<img class="hero" src="'+esc(foto.bild)+'" style="max-height:220px;object-fit:contain">'+
     (k.length ? '<div class="karte" style="margin-top:12px">'+k.map((c,i)=>'<div class="zeile" onclick="kandidatWaehlen('+i+')"><div class="mitte"><div class="titel">'+esc(c.name)+' <span class="badge'+(c.sicherheit>=70?'':' gelb')+'">'+Math.round(c.sicherheit||0)+' %</span></div><div class="sub"><i>'+esc(c.botanisch||'')+'</i>'+(c.sorte?' · '+esc(c.sorte):'')+'</div><div class="sub">'+esc(c.merkmale||'')+'</div></div><span>›</span></div>').join('')+'</div>' : '<div class="leer">Keine Pflanze erkannt.</div>')+
     (r && r.hinweis ? '<p class="sub" style="margin-top:10px">💡 '+esc(r.hinweis)+'</p>' : '')+
     '<div class="reihe" style="margin-top:14px"><button class="knopf zwei" onclick="fotoBestimmen()">Anderes Foto</button><button class="knopf zwei" onclick="pflanzeForm({flaecheId:S.tmp.flaecheId}, S.tmp.foto)">Name selbst eingeben</button></div>');
@@ -498,7 +498,7 @@ function pflanzeForm(v, foto, bestehend){
   v = v || {}; S.tmp.formFoto = foto || null;
   const kreise = S.d.kreise.map(k=>({v:k.id,t:k.name}));
   const html =
-    (foto ? '<img class="hero" src="'+esc(foto.thumb)+'" style="max-height:140px;width:140px">' : '')+
+    (foto ? '<img class="hero" src="'+esc(foto.bild)+'" style="max-height:180px;object-fit:contain">' : '')+
     '<label class="feld">Name *<input id="pfName" value="'+esc(v.name||'')+'" placeholder="z. B. Hortensie"></label>'+
     '<label class="feld">Botanischer Name<input id="pfBot" value="'+esc(v.botanisch||'')+'" placeholder="optional"></label>'+
     '<label class="feld">Sorte<input id="pfSorte" value="'+esc(v.sorte||'')+'" placeholder="optional"></label>'+
@@ -508,7 +508,9 @@ function pflanzeForm(v, foto, bestehend){
     '<label class="feld">Bewässerung'+seg('bew',['Manuell','Automatisch'], v.bewaesserung||'Manuell')+'</label>'+
     '<div id="pfKreisBox"><label class="feld">Bewässerungskreis<select id="pfKreis">'+optionen(kreise, v.kreisId||'', kreise.length?'– wählen –':'noch keine Kreise angelegt')+'</select></label></div>'+
     '<label class="feld">Gepflanzt am<input type="date" id="pfDatum" value="'+esc(v.pflanzdatum||'')+'"></label>'+
-    '<label class="feld">Notiz<textarea id="pfNotiz">'+esc(v.notiz||'')+'</textarea></label>'+
+    '<label class="feld">Hält bei mir aus bis (°C)<input type="number" step="1" id="pfFrost" value="'+esc(v.prof && v.prof.frostgrenzeEigen!==undefined ? v.prof.frostgrenzeEigen : '')+'" placeholder="leer = Angabe aus dem Steckbrief" oninput="pfGeaendert()"></label>'+
+    '<label class="feld">Mein Vorgehen / Notiz<textarea id="pfNotiz" placeholder="z. B. Überwintert draußen unter dem Dach, Bewässerung wird abgeklemmt, Haube über die Krone und Vlies um den Topf" oninput="pfGeaendert()">'+esc(v.notiz||'')+'</textarea></label>'+
+    '<p class="klein" style="margin:4px 0 0">Dein Vorgehen fließt in Steckbrief und Pflegeplan ein und hat Vorrang vor allgemeinen Empfehlungen.</p>'+
     (bestehend ? '<label class="check"><input type="checkbox" id="pfNeuProfil"> Steckbrief und Pflegeplan neu erstellen</label><div class="klein" id="pfProfilHinweis"></div>' : '<p class="klein" style="margin-top:12px">Beim Speichern erstellt die KI den Steckbrief mit Schnitt-, Dünge- und Pflegeplan. Das dauert ca. 20 Sekunden.</p>')+
     '<button class="knopf voll" style="margin-top:14px" onclick="pflanzeSpeichern(\''+(bestehend||'')+'\')">Speichern</button>';
   sheet(bestehend ? 'Pflanze bearbeiten' : 'Neue Pflanze', html);
@@ -521,12 +523,12 @@ function pflanzeForm(v, foto, bestehend){
 }
 function pfGeaendert(){
   const c = $('pfNeuProfil'); if(!c) return;
-  c.checked = true; $('pfProfilHinweis').textContent = 'Standort, Haltung oder Bewässerung geändert – Pflegeplan wird angepasst.';
+  c.checked = true; $('pfProfilHinweis').textContent = 'Angaben geändert – Steckbrief und Pflegeplan werden angepasst.';
 }
 async function pflanzeSpeichern(id){
   const d = { id:id||'', name:feld('pfName'), botanisch:feld('pfBot'), sorte:feld('pfSorte'), flaecheId:feld('pfFl'),
     haltung:segWert('haltung'), winterFlaecheId:feld('pfWinter'), bewaesserung:segWert('bew'), kreisId:feld('pfKreis'),
-    pflanzdatum:feld('pfDatum'), notiz:feld('pfNotiz') };
+    pflanzdatum:feld('pfDatum'), notiz:feld('pfNotiz'), frostEigen:feld('pfFrost') };
   if(!d.name) return toast('Bitte einen Namen eingeben.', true);
   if(!d.flaecheId) return toast('Bitte eine Fläche wählen.', true);
   let neueId;
@@ -581,7 +583,8 @@ function pflanzeDetail(id){
   html += abschnitt('💧','Gießen'+(prof.wasserbedarf?' · Bedarf '+esc(prof.wasserbedarf):''), (prof.giessen||'') + (p.bewaesserung==='Automatisch' ? '\nHängt an der automatischen Bewässerung'+((S.krM[p.kreisId]||{}).name?' ('+S.krM[p.kreisId].name+')':'')+'.' : ''));
   html += abschnitt('🧪','Düngen', prof.duengen);
   html += abschnitt('✂️','Schnitt', prof.schnitt);
-  html += abschnitt('❄️','Winter'+(prof.frostgrenze!==null && prof.frostgrenze!==undefined ? ' · winterhart bis ca. '+prof.frostgrenze+' °C' : ''), prof.winter);
+  const fEigen = prof.frostgrenzeEigen!==undefined && prof.frostgrenzeEigen!==null;
+  html += abschnitt('❄️','Winter'+(fEigen ? ' · hält bei dir bis ca. '+prof.frostgrenzeEigen+' °C' : (prof.frostgrenze!==null && prof.frostgrenze!==undefined ? ' · winterhart bis ca. '+prof.frostgrenze+' °C' : '')), prof.winter);
   html += abschnitt('🐛','Schädlinge & Krankheiten', prof.schaedlinge);
   if(gift) html += '<div class="abschnitt"><h4>☠️ Giftigkeit · <span class="badge'+(gift.stufe==='ungiftig'?'':' rot')+'">'+esc(gift.stufe||'')+'</span></h4><p>'+esc(gift.text||'')+'</p></div>';
   if(Array.isArray(prof.tipps) && prof.tipps.length) html += '<div class="abschnitt"><h4>💡 Tipps</h4><p>'+prof.tipps.map(t=>'• '+esc(t)).join('\n')+'</p></div>';
@@ -596,6 +599,8 @@ async function ladeTagebuch(id){
   try {
     const fotos = await api('getFotos', id);
     S.tmp.fotos = fotos;
+    const hero = $('pfHero');
+    if (hero && fotos.length) api('getFoto', fotos[0].id).then(src => { if ($('pfHero') === hero) hero.src = src; }).catch(()=>{});
     const el = $('tagebuch'); if(!el) return;
     if(!fotos.length){ el.innerHTML = 'Noch keine Fotos. Mit „Foto ins Tagebuch“ oder „Zustand prüfen“ dokumentierst du das Wachstum.'; return; }
     el.className = 'tagebuch';
@@ -642,7 +647,7 @@ async function zustandPruefen(id){
   try { foto = await fotoHolen(1600); } catch(e){ return fehler(e); }
   if(!foto) return;
   S.tmp.checkFoto = foto;
-  sheet('🔍 Zustand prüfen', '<img class="hero" src="'+esc(foto.thumb)+'" style="max-height:180px">'+
+  sheet('🔍 Zustand prüfen', '<img class="hero" src="'+esc(foto.bild)+'" style="max-height:220px;object-fit:contain">'+
     '<label class="feld">Anmerkung (optional)<textarea id="ckNotiz" placeholder="z. B. Blätter werden gelb, seit 2 Wochen"></textarea></label>'+
     '<button class="knopf voll" style="margin-top:14px" onclick="zustandSenden(\''+id+'\')">Beurteilen lassen</button>');
 }
@@ -651,7 +656,7 @@ async function zustandSenden(id){
   try { r = await mit('Die KI schaut sich die Pflanze an …', ()=>api('pruefeFoto', id, S.tmp.checkFoto, feld('ckNotiz'))); } catch(e){ return; }
   S.tmp.check = { id, r };
   const hat = r.massnahmen && r.massnahmen.length;
-  sheet('🔍 '+esc(S.pfM[id].name), '<img class="hero" src="'+esc(S.tmp.checkFoto.thumb)+'" style="max-height:160px;width:160px">'+bewertungHtml(r, true)+
+  sheet('🔍 '+esc(S.pfM[id].name), '<img class="hero" src="'+esc(S.tmp.checkFoto.bild)+'" style="max-height:200px;object-fit:contain">'+bewertungHtml(r, true)+
     '<div class="reihe" style="margin-top:16px">'+(hat?'<button class="knopf" onclick="massnahmenUebernehmen()">Ausgewählte als Aufgaben übernehmen</button>':'')+
     '<button class="knopf zwei" onclick="neuLaden(true).then(()=>pflanzeDetail(\''+id+'\'))">Fertig</button></div>');
 }
@@ -666,7 +671,7 @@ async function tagebuchFoto(id){
   try { foto = await fotoHolen(1600); } catch(e){ return fehler(e); }
   if(!foto) return;
   S.tmp.tbFoto = foto;
-  sheet('📷 Tagebuch', '<img class="hero" src="'+esc(foto.thumb)+'" style="max-height:180px">'+
+  sheet('📷 Tagebuch', '<img class="hero" src="'+esc(foto.bild)+'" style="max-height:220px;object-fit:contain">'+
     '<label class="feld">Notiz (optional)<textarea id="tbNotiz" placeholder="z. B. erste Blüten"></textarea></label>'+
     '<button class="knopf voll" style="margin-top:14px" onclick="tagebuchSpeichern(\''+id+'\')">Speichern</button>');
 }
