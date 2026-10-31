@@ -135,6 +135,10 @@ textarea{min-height:70px;resize:vertical}
 #laden.zu{display:none}
 .spinner{width:42px;height:42px;border-radius:50%;border:4px solid rgba(255,255,255,.3);border-top-color:#fff;animation:dreh 0.9s linear infinite}
 @keyframes dreh{to{transform:rotate(360deg)}}
+#quelle{position:fixed;inset:0;z-index:95;display:flex;align-items:flex-end;justify-content:center;padding:16px 16px calc(16px + env(safe-area-inset-bottom));background:rgba(10,15,10,.5)}
+#quelle.zu{display:none}
+#quelle .box{background:var(--karte);color:var(--text);border-radius:16px;padding:16px;max-width:420px;width:100%}
+#quelle .box p{margin:0 0 12px;font-weight:600}
 #frage{position:fixed;inset:0;z-index:95;display:flex;align-items:center;justify-content:center;padding:24px;background:rgba(10,15,10,.5)}
 #frage.zu{display:none}
 #frage .box{background:var(--karte);color:var(--text);border-radius:16px;padding:18px;max-width:380px;width:100%;box-shadow:0 8px 30px rgba(0,0,0,.3)}
@@ -162,6 +166,7 @@ textarea{min-height:70px;resize:vertical}
 <div id="sheet" class="sheet zu"><div class="sheet-bg" onclick="sheetZu()"></div><div class="sheet-box"><div class="griff"></div><div id="sheetInhalt"></div></div></div>
 <div id="laden" class="zu"><div class="spinner"></div><div id="ladenText"></div></div>
 <div id="toast"></div>
+<div id="quelle" class="zu"><div class="box"><p>Foto aufnehmen oder aus der Galerie wählen?</p><div style="display:grid;gap:8px"><button class="knopf" id="qKamera">📷 Kamera</button><button class="knopf zwei" id="qGalerie">🖼️ Galerie</button><button class="knopf zwei" id="qAbbruch">Abbrechen</button></div></div></div>
 <div id="frage" class="zu"><div class="box"><p id="frageText"></p><div class="reihe"><button class="knopf zwei" id="frageNein">Abbrechen</button><button class="knopf" id="frageJa">OK</button></div></div></div>
 <input type="file" id="dateiInput" accept="image/*" style="display:none">
 
@@ -247,9 +252,18 @@ function sheet(titel, html){
 function sheetZu(){ $('sheet').classList.add('zu'); }
 
 /* ================= Bilder ================= */
-function dateiWaehlen(){
+/** Fragt Kamera oder Galerie ab. Liefert 'kamera', 'galerie' oder null. */
+function fotoQuelle(){
+  return new Promise(res => {
+    $('quelle').classList.remove('zu');
+    const ende = v => { $('quelle').classList.add('zu'); res(v); };
+    $('qKamera').onclick = () => ende('kamera'); $('qGalerie').onclick = () => ende('galerie'); $('qAbbruch').onclick = () => ende(null);
+  });
+}
+function dateiWaehlen(quelle){
   return new Promise((res) => {
     const inp = $('dateiInput'); inp.value='';
+    if(quelle === 'kamera') inp.setAttribute('capture', 'environment'); else inp.removeAttribute('capture');
     inp.onchange = () => res(inp.files && inp.files[0] ? inp.files[0] : null);
     inp.click();
   });
@@ -271,8 +285,10 @@ function aufCanvas(img, max, quadrat, q){
   return c.toDataURL('image/jpeg', q);
 }
 /** Startet die Dateiauswahl (muss direkt im Klick passieren) und liefert {bild, thumb}. */
-async function fotoHolen(maxGross){
-  const file = await dateiWaehlen();
+async function fotoHolen(maxGross, nurGalerie){
+  const quelle = nurGalerie ? 'galerie' : await fotoQuelle();
+  if(!quelle) return null;
+  const file = await dateiWaehlen(quelle);
   if(!file) return null;
   const {img, url} = await bildLaden(file);
   const out = { bild: aufCanvas(img, maxGross||1600, false, 0.85), thumb: aufCanvas(img, 240, true, 0.72) };
@@ -905,7 +921,7 @@ async function planPflanzeEntfernen(){
 }
 async function planHochladen(){
   let foto;
-  try { foto = await fotoHolen(2200); } catch(e){ return fehler(e); }
+  try { foto = await fotoHolen(2200, true); } catch(e){ return fehler(e); }
   if(!foto) return;
   await mit('Lade Plan hoch …', ()=>api('speicherePlanBild', foto.bild));
   S.plan.bild = foto.bild; S.d.einstellungen.hatPlan = true; S.plan.zoom = 1;
