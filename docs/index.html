@@ -20,22 +20,37 @@
 :root[data-theme="dark"]{--bg:#141814;--text:#e7ebe3;--leise:#9aa596;--gruen:#6fb37a;--knopftext:#102012;--karte:#1d221d;--linie:#2e352d}
 *{box-sizing:border-box}
 html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+#app{position:fixed;left:0;right:0;top:env(safe-area-inset-top);bottom:env(safe-area-inset-bottom);width:100%;height:calc(100% - env(safe-area-inset-top) - env(safe-area-inset-bottom));border:0;background:var(--bg);visibility:hidden}
+#app.da{visibility:visible}
 .mitte{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:24px;text-align:center}
 .mitte img{width:96px;height:96px;border-radius:22px}
 .mitte h1{margin:0;font-size:22px}
 .leise{color:var(--leise);font-size:14px;max-width:340px;margin:0}
 .knopf{display:inline-block;border:0;border-radius:10px;padding:11px 16px;background:var(--gruen);color:var(--knopftext);font:inherit;font-weight:600;cursor:pointer;text-decoration:none}
+.knopf.zwei{background:transparent;color:var(--gruen);border:1px solid var(--linie)}
 input{width:100%;max-width:420px;padding:11px 12px;border-radius:10px;border:1px solid var(--linie);background:var(--karte);color:var(--text);font:inherit}
 .versteckt{display:none!important}
+.punkte span{display:inline-block;width:8px;height:8px;margin:0 3px;border-radius:50%;background:var(--gruen);opacity:.3;animation:p 1.2s infinite}
+.punkte span:nth-child(2){animation-delay:.2s}.punkte span:nth-child(3){animation-delay:.4s}
+@keyframes p{50%{opacity:1}}
 </style>
 </head>
 <body>
 
-<div class="mitte" id="start">
+<div class="mitte" id="laden">
   <img src="icon-192.png" alt="">
   <h1>Gartenjahr</h1>
-  <p class="leise">wird geöffnet …</p>
-  <a class="knopf" id="go" href="#">Falls nichts passiert, hier tippen</a>
+  <div class="punkte" id="punkte"><span></span><span></span><span></span></div>
+  <p class="leise versteckt" id="stayText">Diese Seite jetzt über ⋮ → „Zum Startbildschirm hinzufügen“ ablegen.</p>
+</div>
+
+<div class="mitte versteckt" id="problem">
+  <img src="icon-192.png" alt="">
+  <h1>App lädt nicht eingebettet</h1>
+  <p class="leise">Google lässt die App hier gerade nicht ohne Hinweis-Banner anzeigen. Direkt geöffnet funktioniert sie – dann mit Banner.</p>
+  <a class="knopf" id="direkt" href="#">Direkt öffnen</a>
+  <button class="knopf zwei" id="immerDirekt">Immer direkt öffnen</button>
+  <button class="knopf zwei" onclick="location.reload()">Erneut versuchen</button>
 </div>
 
 <div class="mitte versteckt" id="setup">
@@ -43,9 +58,11 @@ input{width:100%;max-width:420px;padding:11px 12px;border-radius:10px;border:1px
   <h1>Gartenjahr einrichten</h1>
   <p class="leise">Füge einmalig die Web-App-URL aus script.google.com ein (Bereitstellen → Bereitstellungen verwalten, endet auf <b>/exec</b>).</p>
   <input id="url" placeholder="https://script.google.com/macros/s/…/exec" autocomplete="off">
-  <button class="knopf" id="speichern">Speichern und öffnen</button>
+  <button class="knopf" id="speichern">Speichern</button>
   <p class="leise" id="fehler"></p>
 </div>
+
+<iframe id="app" title="Gartenjahr" allow="camera; geolocation; clipboard-write"></iframe>
 
 <script>
 // Fest hinterlegte Adresse (optional). Bleibt sie leer, wird sie einmalig abgefragt.
@@ -53,33 +70,49 @@ var FEST_URL = '';
 
 function lies(k){ try { return localStorage.getItem(k) || ''; } catch(e){ return ''; } }
 function schreib(k,v){ try { if(v) localStorage.setItem(k,v); else localStorage.removeItem(k); } catch(e){} }
+function zeige(id){ ['laden','problem','setup'].forEach(function(x){ document.getElementById(x).classList.toggle('versteckt', x!==id); }); }
 function gueltig(u){ return /^https:\/\/script\.google\.com\/(a\/[^\/]+\/)?macros\/s\/[\w-]+\/exec$/.test(u); }
 
 var q = location.search;
-if (/[?&]setup/.test(q)) schreib('gj_url', '');
+var stay = /[?&]stay/.test(q);
+if (/[?&]setup/.test(q)) { schreib('gj_url',''); schreib('gj_modus',''); }
+if (/[?&]einbetten/.test(q)) schreib('gj_modus','');
 var p = q.match(/[?&]app=([^&]+)/);
 if (p && gueltig(decodeURIComponent(p[1]))) schreib('gj_url', decodeURIComponent(p[1]));
 
 var APP = FEST_URL || lies('gj_url');
-var standalone = window.navigator.standalone || window.matchMedia('(display-mode: standalone)').matches;
 
-function oeffnen(){
-  document.getElementById('go').href = APP;
-  // ?stay zeigt die Seite ohne Weiterleitung, damit man sie zum Startbildschirm hinzufügen kann
-  if (standalone || !/[?&]stay/.test(location.search)) setTimeout(function(){ location.replace(APP); }, 150);
+function starten(){
+  document.getElementById('direkt').href = APP;
+  document.getElementById('immerDirekt').onclick = function(){ schreib('gj_modus','direkt'); location.replace(APP); };
+  if (stay) { // nur Logo-Seite zeigen, damit man sie zum Startbildschirm hinzufügen kann
+    zeige('laden');
+    document.getElementById('punkte').classList.add('versteckt');
+    document.getElementById('stayText').classList.remove('versteckt');
+    return;
+  }
+  if (lies('gj_modus') === 'direkt') { location.replace(APP); return; }
+  zeige('laden');
+  var frame = document.getElementById('app');
+  var bereit = false;
+  window.addEventListener('message', function(e){
+    if (e.data === 'gartenjahr:bereit' && !bereit) {
+      bereit = true;
+      frame.classList.add('da');
+      zeige(null);
+    }
+  });
+  frame.src = APP;
+  setTimeout(function(){ if (!bereit) zeige('problem'); }, 12000);
 }
 
-if (APP) oeffnen();
+if (APP) starten();
 else {
-  document.getElementById('start').classList.add('versteckt');
-  document.getElementById('setup').classList.remove('versteckt');
+  zeige('setup');
   document.getElementById('speichern').onclick = function(){
     var u = document.getElementById('url').value.trim();
     if (!gueltig(u)) { document.getElementById('fehler').textContent = 'Das ist keine Web-App-URL. Sie beginnt mit https://script.google.com/macros/s/ und endet auf /exec.'; return; }
-    schreib('gj_url', u); APP = u;
-    document.getElementById('setup').classList.add('versteckt');
-    document.getElementById('start').classList.remove('versteckt');
-    oeffnen();
+    schreib('gj_url', u); APP = u; starten();
   };
 }
 </script>

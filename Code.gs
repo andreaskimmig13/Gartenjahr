@@ -4,7 +4,7 @@
  * KI: Claude API (Schlüssel in den Skripteigenschaften).
  * Wetter: Open-Meteo (kostenlos, ohne Schlüssel).
  */
-const VERSION = '1.0.4';
+const VERSION = '1.0.5';
 const TZ = 'Europe/Berlin';
 
 const TABELLEN = {
@@ -84,6 +84,8 @@ function doGet() {
   return HtmlService.createHtmlOutputFromFile('Index')
     .setTitle('Gartenjahr')
     .setFaviconUrl('https://andreaskimmig13.github.io/Gartenjahr/favicon.png')
+    // Erlaubt das Einbetten in die eigene Startseite (dort ohne Google-Hinweisbanner)
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL)
     .addMetaTag('viewport', 'width=device-width, initial-scale=1, viewport-fit=cover')
     .addMetaTag('mobile-web-app-capable', 'yes')
     .addMetaTag('apple-mobile-web-app-capable', 'yes');
