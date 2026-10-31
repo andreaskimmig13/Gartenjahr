@@ -53,9 +53,10 @@ Zurück zu einer älteren Version: dieselbe Stelle, ältere Version wählen.
 - **Pl@ntNet** für die Bestimmung, falls die Erkennung über Claude nicht reicht.
 - **Familie mitnutzen:** Ordner teilen und die Bereitstellung auf „Jeder mit Google-Konto“ umstellen.
 
-## App-Logo und ohne Google-Hinweis
-Google blendet bei direkt aufgerufenen Apps-Script-Web-Apps einen Hinweis ein. Die Startseite **andreaskimmig13.github.io/Gartenjahr** zeigt die App eingebettet – mit Logo und ohne diesen Hinweis.
-1. Startseite auf dem Handy öffnen, einmalig die Web-App-URL (endet auf /exec) einfügen.
-2. Zum Startbildschirm hinzufügen (iPhone: Teilen → „Zum Home-Bildschirm“, Android: ⋮ → „Zum Startbildschirm hinzufügen“). Beim iPhone fragt das Symbol beim ersten Start die URL noch einmal ab.
-3. Klappt das Einbetten nicht (z. B. nicht bei Google angemeldet), bietet die Seite „Direkt öffnen“ an.
+## App-Logo auf dem Startbildschirm
+Statt der Google-Adresse die Startseite **andreaskimmig13.github.io/Gartenjahr** auf den Startbildschirm legen. Sie zeigt das Logo und leitet sofort zur App weiter.
+1. Einmalig **andreaskimmig13.github.io/Gartenjahr/?stay** öffnen (ohne Weiterleitung) und die Web-App-URL (endet auf /exec) einfügen.
+2. Zum Startbildschirm hinzufügen (Android: ⋮ → „Zum Startbildschirm hinzufügen“, iPhone: Teilen → „Zum Home-Bildschirm“).
 Adresse ändern: `…/Gartenjahr/?setup` öffnen.
+
+Hinweis: Den Google-Hinweis „Diese Anwendung wurde von einem Google Apps Script-Nutzer erstellt“ blendet Google bei direkt geöffneten Apps-Script-Web-Apps immer ein. Einbetten ohne Hinweis funktioniert bei „Zugriff: Nur ich“ wegen der Google-Anmeldung nicht zuverlässig.

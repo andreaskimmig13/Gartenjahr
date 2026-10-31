@@ -10,7 +10,6 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Gartenjahr">
-<meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="theme-color" content="#f4f1ea" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#141814" media="(prefers-color-scheme: dark)">
 <style>
@@ -21,44 +20,24 @@
 :root[data-theme="dark"]{--bg:#141814;--text:#e7ebe3;--leise:#9aa596;--gruen:#6fb37a;--knopftext:#102012;--karte:#1d221d;--linie:#2e352d}
 *{box-sizing:border-box}
 html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
-#app{position:fixed;left:0;right:0;top:env(safe-area-inset-top);bottom:env(safe-area-inset-bottom);width:100%;height:calc(100% - env(safe-area-inset-top) - env(safe-area-inset-bottom));border:0;background:var(--bg);visibility:hidden}
-#app.da{visibility:visible}
 .mitte{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:24px;text-align:center}
 .mitte img{width:96px;height:96px;border-radius:22px}
 .mitte h1{margin:0;font-size:22px}
-.leise{color:var(--leise);font-size:14px;max-width:340px}
+.leise{color:var(--leise);font-size:14px;max-width:340px;margin:0}
 .knopf{display:inline-block;border:0;border-radius:10px;padding:11px 16px;background:var(--gruen);color:var(--knopftext);font:inherit;font-weight:600;cursor:pointer;text-decoration:none}
-.knopf.zwei{background:transparent;color:var(--gruen);border:1px solid var(--linie)}
 input{width:100%;max-width:420px;padding:11px 12px;border-radius:10px;border:1px solid var(--linie);background:var(--karte);color:var(--text);font:inherit}
 .versteckt{display:none!important}
-#leiste{position:fixed;z-index:5;left:12px;right:12px;bottom:calc(76px + env(safe-area-inset-bottom));display:flex;gap:8px;align-items:center;background:var(--karte);border:1px solid var(--linie);border-radius:12px;padding:8px 10px;box-shadow:0 2px 10px rgba(0,0,0,.15);font-size:14px}
-#leiste span{flex:1}
-#leiste .knopf{padding:7px 12px}
-.punkte span{display:inline-block;width:8px;height:8px;margin:0 3px;border-radius:50%;background:var(--gruen);opacity:.3;animation:p 1.2s infinite}
-.punkte span:nth-child(2){animation-delay:.2s}.punkte span:nth-child(3){animation-delay:.4s}
-@keyframes p{50%{opacity:1}}
 </style>
 </head>
 <body>
 
-<!-- Ladebildschirm -->
-<div class="mitte" id="laden">
+<div class="mitte" id="start">
   <img src="icon-192.png" alt="">
   <h1>Gartenjahr</h1>
-  <div class="punkte"><span></span><span></span><span></span></div>
+  <p class="leise">wird geöffnet …</p>
+  <a class="knopf" id="go" href="#">Falls nichts passiert, hier tippen</a>
 </div>
 
-<!-- Einbetten klappt nicht -->
-<div class="mitte versteckt" id="problem">
-  <img src="icon-192.png" alt="">
-  <h1>App lädt nicht</h1>
-  <p class="leise">Eingebettet lässt sich die App gerade nicht öffnen – meist, weil du in diesem Browser noch nicht bei Google angemeldet bist oder der Browser das Einbetten blockiert.</p>
-  <a class="knopf" id="direkt" href="#">Direkt öffnen</a>
-  <button class="knopf zwei" onclick="location.reload()">Erneut versuchen</button>
-  <button class="knopf zwei" id="immerDirekt">Immer direkt öffnen (mit Google-Hinweis)</button>
-</div>
-
-<!-- Einrichtung: Web-App-Adresse hinterlegen -->
 <div class="mitte versteckt" id="setup">
   <img src="icon-192.png" alt="">
   <h1>Gartenjahr einrichten</h1>
@@ -68,54 +47,39 @@ input{width:100%;max-width:420px;padding:11px 12px;border-radius:10px;border:1px
   <p class="leise" id="fehler"></p>
 </div>
 
-<div id="leiste" class="versteckt"><span>Lädt die App nicht?</span><a class="knopf" id="direkt2" href="#">Direkt öffnen</a><button class="knopf zwei" onclick="document.getElementById('leiste').classList.add('versteckt')">✕</button></div>
-
-<iframe id="app" title="Gartenjahr" allow="camera; geolocation; clipboard-write"></iframe>
-
 <script>
-// Fest hinterlegte Adresse (optional). Bleibt leer, dann wird sie einmalig abgefragt.
+// Fest hinterlegte Adresse (optional). Bleibt sie leer, wird sie einmalig abgefragt.
 var FEST_URL = '';
 
 function lies(k){ try { return localStorage.getItem(k) || ''; } catch(e){ return ''; } }
 function schreib(k,v){ try { if(v) localStorage.setItem(k,v); else localStorage.removeItem(k); } catch(e){} }
-function zeige(id){ ['laden','problem','setup'].forEach(function(x){ document.getElementById(x).classList.toggle('versteckt', x!==id); }); }
 function gueltig(u){ return /^https:\/\/script\.google\.com\/(a\/[^\/]+\/)?macros\/s\/[\w-]+\/exec$/.test(u); }
 
 var q = location.search;
-if (/[?&]setup/.test(q)) { schreib('gj_url',''); schreib('gj_modus',''); }
+if (/[?&]setup/.test(q)) schreib('gj_url', '');
 var p = q.match(/[?&]app=([^&]+)/);
 if (p && gueltig(decodeURIComponent(p[1]))) schreib('gj_url', decodeURIComponent(p[1]));
 
 var APP = FEST_URL || lies('gj_url');
+var standalone = window.navigator.standalone || window.matchMedia('(display-mode: standalone)').matches;
 
-function starten(){
-  document.getElementById('direkt').href = APP;
-  document.getElementById('direkt2').href = APP;
-  if (lies('gj_modus') === 'direkt') { location.replace(APP); return; }
-  zeige('laden');
-  var frame = document.getElementById('app');
-  var bereit = false;
-  window.addEventListener('message', function(e){
-    if (e.data === 'gartenjahr:bereit') {
-      bereit = true;
-      frame.classList.add('da');
-      zeige(null);
-      document.getElementById('leiste').classList.add('versteckt');
-    }
-  });
-  frame.src = APP;
-  // Kein Signal? App trotzdem zeigen und dezent „Direkt öffnen“ anbieten
-  setTimeout(function(){ if (!bereit) { frame.classList.add('da'); zeige(null); document.getElementById('leiste').classList.remove('versteckt'); } }, 8000);
-  document.getElementById('immerDirekt').onclick = function(){ schreib('gj_modus','direkt'); location.replace(APP); };
+function oeffnen(){
+  document.getElementById('go').href = APP;
+  // ?stay zeigt die Seite ohne Weiterleitung, damit man sie zum Startbildschirm hinzufügen kann
+  if (standalone || !/[?&]stay/.test(location.search)) setTimeout(function(){ location.replace(APP); }, 150);
 }
 
-if (APP) starten();
+if (APP) oeffnen();
 else {
-  zeige('setup');
+  document.getElementById('start').classList.add('versteckt');
+  document.getElementById('setup').classList.remove('versteckt');
   document.getElementById('speichern').onclick = function(){
     var u = document.getElementById('url').value.trim();
     if (!gueltig(u)) { document.getElementById('fehler').textContent = 'Das ist keine Web-App-URL. Sie beginnt mit https://script.google.com/macros/s/ und endet auf /exec.'; return; }
-    schreib('gj_url', u); APP = u; starten();
+    schreib('gj_url', u); APP = u;
+    document.getElementById('setup').classList.add('versteckt');
+    document.getElementById('start').classList.remove('versteckt');
+    oeffnen();
   };
 }
 </script>
