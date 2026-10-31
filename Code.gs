@@ -4,7 +4,7 @@
  * KI: Claude API (Schlüssel in den Skripteigenschaften).
  * Wetter: Open-Meteo (kostenlos, ohne Schlüssel).
  */
-const VERSION = '1.0.8';
+const VERSION = '1.0.9';
 const TZ = 'Europe/Berlin';
 
 const TABELLEN = {
@@ -894,7 +894,7 @@ function claude_(system, text, bildB64, maxTokens) {
   const res = UrlFetchApp.fetch('https://api.anthropic.com/v1/messages', {
     method: 'post', contentType: 'application/json', muteHttpExceptions: true,
     headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01' },
-    payload: JSON.stringify({ model: s.modell || STANDARD.modell, max_tokens: maxTokens || 2000, temperature: 0, system: system, messages: [{ role: 'user', content: content }] })
+    payload: JSON.stringify({ model: s.modell || STANDARD.modell, max_tokens: maxTokens || 2000, system: system, messages: [{ role: 'user', content: content }] })
   });
   const code = res.getResponseCode(), body = res.getContentText();
   if (code !== 200) {
