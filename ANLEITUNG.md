@@ -54,8 +54,8 @@ Zurück zu einer älteren Version: dieselbe Stelle, ältere Version wählen.
 - **Familie mitnutzen:** Ordner teilen und die Bereitstellung auf „Jeder mit Google-Konto“ umstellen.
 
 ## App-Logo und ohne Google-Hinweis
-Google blendet bei direkt aufgerufenen Apps-Script-Web-Apps einen Hinweis ein. Die Startseite **andreaskimmig13.github.io/gartenjahr** zeigt die App eingebettet – mit Logo und ohne diesen Hinweis.
+Google blendet bei direkt aufgerufenen Apps-Script-Web-Apps einen Hinweis ein. Die Startseite **andreaskimmig13.github.io/Gartenjahr** zeigt die App eingebettet – mit Logo und ohne diesen Hinweis.
 1. Startseite auf dem Handy öffnen, einmalig die Web-App-URL (endet auf /exec) einfügen.
 2. Zum Startbildschirm hinzufügen (iPhone: Teilen → „Zum Home-Bildschirm“, Android: ⋮ → „Zum Startbildschirm hinzufügen“). Beim iPhone fragt das Symbol beim ersten Start die URL noch einmal ab.
 3. Klappt das Einbetten nicht (z. B. nicht bei Google angemeldet), bietet die Seite „Direkt öffnen“ an.
-Adresse ändern: `…/gartenjahr/?setup` öffnen.
+Adresse ändern: `…/Gartenjahr/?setup` öffnen.

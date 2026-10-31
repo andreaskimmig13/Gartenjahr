@@ -83,7 +83,7 @@ function robotVorlagen_(s) {
 function doGet() {
   return HtmlService.createHtmlOutputFromFile('Index')
     .setTitle('Gartenjahr')
-    .setFaviconUrl('https://andreaskimmig13.github.io/gartenjahr/favicon.png')
+    .setFaviconUrl('https://andreaskimmig13.github.io/Gartenjahr/favicon.png')
     // Erlaubt das Einbetten in die eigene Startseite (dort ohne Google-Hinweisbanner)
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL)
     .addMetaTag('viewport', 'width=device-width, initial-scale=1, viewport-fit=cover')
