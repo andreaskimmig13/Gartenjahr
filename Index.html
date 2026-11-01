@@ -423,14 +423,20 @@ function aufgabeDetail(id){
       '<button class="knopf zwei" onclick="aufgabeAktion(\''+a.id+'\',\'verschieben\')">1 Woche später</button>'+
       '<button class="knopf zwei" onclick="aufgabeAktion(\''+a.id+'\',\'ueberspringen\')">Überspringen</button>';
   } else html += '<button class="knopf zwei" onclick="aufgabeAktion(\''+a.id+'\',\'offen\')">Wieder öffnen</button>';
-  if(!a.key) html += '<button class="knopf rot" onclick="aufgabeAktion(\''+a.id+'\',\'loeschen\')">Löschen</button>';
+  html += '</div><div class="reihe" style="margin-top:8px">';
+  if(a.status==='offen') html += '<button class="knopf zwei" onclick="aufgabeForm(null,\''+a.id+'\')">✏️ Bearbeiten</button>';
+  if(a.key) html += '<button class="knopf rot" onclick="aufgabeAktion(\''+a.id+'\',\'nichtMehrPlanen\')">🚫 Nicht mehr planen</button>';
+  else html += '<button class="knopf rot" onclick="aufgabeAktion(\''+a.id+'\',\'loeschen\')">Löschen</button>';
   html += '</div>';
+  if(a.key) html += '<p class="klein" style="margin-top:8px">„Nicht mehr planen“ entfernt diese Aufgabe dauerhaft – auch in den Folgejahren und bei gleichen Pflanzen mit demselben Steckbrief. Rückgängig unter Mehr → Ausgeblendete Aufgaben.</p>';
   sheet(esc(a.titel), html);
 }
 async function aufgabeAktion(id, aktion){
   if(aktion==='loeschen' && !await frage('Aufgabe löschen?')) return;
-  await mit('Speichere …', ()=>api('aufgabeAktion', id, aktion));
-  sheetZu(); toast({verschieben:'Verschoben',ueberspringen:'Übersprungen',offen:'Wieder offen',loeschen:'Gelöscht'}[aktion]||'Gespeichert');
+  if(aktion==='nichtMehrPlanen' && !await frage('Diese Aufgabe künftig nicht mehr einplanen?', 'Nicht mehr planen')) return;
+  const r = await mit('Speichere …', ()=>api('aufgabeAktion', id, aktion));
+  sheetZu(); toast(aktion==='nichtMehrPlanen' ? (r>1 ? 'Wird nicht mehr geplant (auch bei '+(r-1)+' gleichen Pflanze'+(r>2?'n':'')+')' : 'Wird nicht mehr geplant') :
+    ({verschieben:'Verschoben',ueberspringen:'Übersprungen',offen:'Wieder offen',loeschen:'Gelöscht'}[aktion]||'Gespeichert'));
   neuLaden(true);
 }
 async function aufEinkauf(aufgabeId){
@@ -438,23 +444,27 @@ async function aufEinkauf(aufgabeId){
   await mit('Speichere …', ()=>api('einkaufNeu', {artikel:a.material, notiz:a.titel+' – '+bezugText(a), aufgabeId:a.id}));
   toast('Auf der Einkaufsliste'); sheetZu(); neuLaden(true);
 }
-function aufgabeForm(vorgabe){
-  vorgabe = vorgabe || {};
+function aufgabeForm(vorgabe, editId){
+  const alt = editId ? S.d.aufgaben.find(x=>x.id===editId) : null;
+  const v = alt || vorgabe || {};
   const h = heute();
   const bezug = [{v:'',t:'– ohne Bezug –'}].concat(S.d.pflanzen.map(p=>({v:p.id,t:'🌿 '+p.name}))).concat(S.d.flaechen.map(f=>({v:f.id,t:'▦ '+f.name})));
-  sheet('Neue Aufgabe',
-    '<label class="feld">Was ist zu tun?<input id="afTitel" placeholder="z. B. Hecke schneiden"></label>'+
-    '<label class="feld">Kategorie<select id="afKat">'+optionen(KATEGORIEN.map(k=>({v:k,t:(KAT[k])+' '+k})), 'Pflege')+'</select></label>'+
-    '<label class="feld">Bezug<select id="afBezug">'+optionen(bezug, vorgabe.bezugId||'')+'</select></label>'+
-    '<div class="reihe"><label class="feld" style="flex:1">Ab<input type="date" id="afVon" value="'+h+'"></label><label class="feld" style="flex:1">Bis<input type="date" id="afBis" value="'+addTage(h,7)+'"></label></div>'+
-    '<label class="feld">Hinweis<textarea id="afHinweis"></textarea></label>'+
-    '<label class="feld">Material zum Einkaufen<input id="afMaterial" placeholder="optional"></label>'+
-    '<button class="knopf voll" style="margin-top:16px" onclick="aufgabeSpeichern()">Speichern</button>');
+  const kats = KATEGORIEN.indexOf(v.kategorie)<0 && v.kategorie ? KATEGORIEN.concat([v.kategorie]) : KATEGORIEN;
+  sheet(alt ? 'Aufgabe bearbeiten' : 'Neue Aufgabe',
+    '<label class="feld">Was ist zu tun?<input id="afTitel" placeholder="z. B. Hecke schneiden" value="'+esc(v.titel||'')+'"></label>'+
+    '<label class="feld">Kategorie<select id="afKat">'+optionen(kats.map(k=>({v:k,t:(KAT[k]||'')+' '+k})), v.kategorie||'Pflege')+'</select></label>'+
+    (alt && alt.key ? '<p class="sub">Bezug: '+esc(bezugText(alt)||'–')+'</p>' : '<label class="feld">Bezug<select id="afBezug">'+optionen(bezug, v.bezugId||'')+'</select></label>')+
+    '<div class="reihe"><label class="feld" style="flex:1">Ab<input type="date" id="afVon" value="'+esc(v.von||h)+'"></label><label class="feld" style="flex:1">Bis<input type="date" id="afBis" value="'+esc(v.bis||addTage(h,7))+'"></label></div>'+
+    '<label class="feld">Hinweis<textarea id="afHinweis">'+esc(v.hinweis||'')+'</textarea></label>'+
+    '<label class="feld">Material zum Einkaufen<input id="afMaterial" placeholder="optional" value="'+esc(v.material||'')+'"></label>'+
+    (alt && alt.key ? '<p class="klein" style="margin-top:8px">Die Änderung gilt für diesen Termin. Im nächsten Jahr wird wieder nach Steckbrief geplant.</p>' : '')+
+    '<button class="knopf voll" style="margin-top:16px" onclick="aufgabeSpeichern(\''+(editId||'')+'\')">Speichern</button>');
 }
-async function aufgabeSpeichern(){
-  const d = {titel:feld('afTitel'), kategorie:feld('afKat'), bezugId:feld('afBezug'), von:feld('afVon'), bis:feld('afBis'), hinweis:feld('afHinweis'), material:feld('afMaterial')};
-  await mit('Speichere …', ()=>api('neueAufgabe', d));
-  sheetZu(); toast('Aufgabe angelegt'); neuLaden(true);
+async function aufgabeSpeichern(editId){
+  const d = {titel:feld('afTitel'), kategorie:feld('afKat'), bezugId:$('afBezug')?feld('afBezug'):'', von:feld('afVon'), bis:feld('afBis'), hinweis:feld('afHinweis'), material:feld('afMaterial')};
+  if(editId) await mit('Speichere …', ()=>api('aendereAufgabe', editId, d));
+  else await mit('Speichere …', ()=>api('neueAufgabe', d));
+  sheetZu(); toast(editId ? 'Gespeichert' : 'Aufgabe angelegt'); neuLaden(true);
 }
 
 /* ================= Pflanzen ================= */
@@ -985,15 +995,29 @@ function renderMehr(){
   if(S.mehr==='kreise') return renderKreise();
   if(S.mehr==='rueckblick') return renderRueckblick();
   if(S.mehr==='einstellungen') return renderEinstellungen();
+  if(S.mehr==='ausgeblendet') return renderAusgeblendet();
   const z = (key, icon, titel, sub) => '<div class="zeile" onclick="S.mehr=\''+key+'\';render()"><div class="thumb">'+icon+'</div><div class="mitte"><div class="titel">'+titel+'</div><div class="sub">'+sub+'</div></div><span>›</span></div>';
   $('inhalt').innerHTML = '<div class="karte" style="margin-top:6px">'+
     z('flaechen','▦','Flächen', S.d.flaechen.length+' Flächen – Beete, Rasen, Zimmer, Winterquartier')+
     z('kreise','💧','Bewässerungskreise', S.d.kreise.length+' Kreise')+
     z('rueckblick','📅','Jahresrückblick','Was wurde wann gemacht, Vorher-nachher')+
+    z('ausgeblendet','🚫','Ausgeblendete Aufgaben', (S.d.ausgeblendet||[]).length+' werden nicht mehr geplant')+
     z('einstellungen','⚙️','Einstellungen','KI-Schlüssel, Ort, Mähroboter, Erinnerungen')+
     '</div><p class="klein" style="text-align:center;margin-top:18px">Gartenjahr '+esc(S.d.version)+' · <a href="'+S.d.links.tabelle+'" target="_blank">Tabelle</a> · <a href="'+S.d.links.ordner+'" target="_blank">Drive-Ordner</a></p>';
 }
 const zurueck = '<button class="zurueck" onclick="S.mehr=\'\';render()">‹ Mehr</button>';
+function renderAusgeblendet(){
+  const l = (S.d.ausgeblendet||[]).slice().sort((a,b)=>(bezugText(a)+a.titel).localeCompare(bezugText(b)+b.titel));
+  $('inhalt').innerHTML = zurueck + '<h2>Ausgeblendete Aufgaben</h2>'+
+    (l.length ? '<div class="karte">'+l.map((a,i)=>'<div class="zeile"><div class="thumb">'+(KAT[a.kategorie]||'🚫')+'</div><div class="mitte"><div class="titel">'+esc(a.titel)+'</div><div class="sub">'+esc(bezugText(a)||'')+'</div></div><button class="knopf klein zwei" style="flex:none" onclick="wiederPlanen('+i+')">Wieder planen</button></div>').join('')+'</div>'
+      : '<div class="leer">Keine. Geplante Aufgaben kannst du in der Aufgabe mit „Nicht mehr planen“ dauerhaft ausblenden.</div>');
+  S.tmp.ausgeblendet = l;
+}
+async function wiederPlanen(i){
+  const a = S.tmp.ausgeblendet[i];
+  await mit('Plane neu …', ()=>api('wiederPlanen', a.key));
+  toast('Wird wieder geplant'); await neuLaden(true); render();
+}
 function renderFlaechen(){
   const grp = b => S.d.flaechen.filter(f=>f.bereich===b);
   const zeile = f => '<div class="zeile" onclick="flaecheDetail(\''+f.id+'\')"><div class="thumb">'+(f.typ==='Rasen'?'🟩':f.bereich==='Drinnen'?'🏠':'🌳')+'</div><div class="mitte"><div class="titel">'+esc(f.name)+'</div><div class="sub">'+esc(f.typ)+(f.licht?' · '+esc(f.licht):'')+' · '+S.d.pflanzen.filter(p=>p.flaecheId===f.id).length+' Pflanzen</div></div><span>›</span></div>';

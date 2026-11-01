@@ -4,7 +4,7 @@
  * KI: Claude API (Schlüssel in den Skripteigenschaften).
  * Wetter: Open-Meteo (kostenlos, ohne Schlüssel).
  */
-const VERSION = '1.0.13';
+const VERSION = '1.0.14';
 const TZ = 'Europe/Berlin';
 
 const TABELLEN = {
@@ -384,6 +384,7 @@ function ladeAlles() {
     einkauf: lesen_('Einkauf').map(sauber_),
     einstellungen: oeffentlich_(einstellungen_()),
     hinweise: hinweise,
+    ausgeblendet: (function (o) { return Object.keys(o).map(function (k) { return Object.assign({ key: k }, o[k]); }); })(ausgeblendet_()),
     links: { tabelle: ss_().getUrl(), ordner: 'https://drive.google.com/drive/folders/' + prop_('FOLDER_ID') }
   };
 }
@@ -391,14 +392,34 @@ function ladeAlles() {
 /* ============================================================
  * Aufgaben-Generator
  * ============================================================ */
+/** Vorlagen, die nicht mehr geplant werden sollen: { "quelle|bezugId|vkey": { titel, kategorie, bezugId, datum } } */
+function ausgeblendet_() { return parse_(prop_('AUSGEBLENDET')) || {}; }
+function ausgeblendetSpeichern_(o) { PropertiesService.getScriptProperties().setProperty('AUSGEBLENDET', JSON.stringify(o)); }
+function basisKey_(key) { return String(key || '').split('|').slice(0, 3).join('|'); }
+
+/** Ist die Pflanze noch jung (Pflanzdatum innerhalb der letzten 18 Monate)? Ohne Datum gilt sie als eingewachsen. */
+function istJung_(p, heute) {
+  return !!(p.pflanzdatum && diffTage_(String(p.pflanzdatum).slice(0, 10), heute) < 550);
+}
+/** Winterschutz ist bei eingewachsenen, ausgepflanzten und sicher winterharten Pflanzen unnötig. */
+function winterschutzUnnoetig_(a, p, prof, heute) {
+  if (a.kategorie !== 'Winterschutz') return false;
+  if (/winterquartier|ausräumen|ausraeumen|einräumen|einraeumen/i.test(String(a.titel || ''))) return false;
+  if (a.nurJung && !istJung_(p, heute)) return true;
+  if (p.haltung === 'Topf' || istJung_(p, heute)) return false;
+  const g = (prof.frostgrenzeEigen !== undefined && prof.frostgrenzeEigen !== null && prof.frostgrenzeEigen !== '') ? Number(prof.frostgrenzeEigen) : Number(prof.frostgrenze);
+  return !isNaN(g) && prof.frostgrenze !== null && g <= -15;
+}
+
 function vorlagen_() {
   const s = einstellungen_();
+  const heute = heute_();
   const v = [];
   lesen_('Pflanzen').forEach(function (p) {
     const prof = profil_(p.profil);
     if (!prof || !Array.isArray(prof.aufgaben)) return;
     prof.aufgaben.forEach(function (a) {
-      if (!a || !a.titel || istKontrollaufgabe_(a)) return;
+      if (!a || !a.titel || istKontrollaufgabe_(a) || winterschutzUnnoetig_(a, p, prof, heute)) return;
       v.push({
         quelle: 'pflanze', bezugId: p.id, vkey: slug_((a.kategorie || '') + '-' + a.titel),
         kategorie: a.kategorie || 'Pflege', titel: a.titel, von: a.von, bis: a.bis,
@@ -412,7 +433,8 @@ function vorlagen_() {
   });
   if (bool_(s.maehroboter)) robotVorlagen_(s).forEach(function (r) { v.push(Object.assign({}, r, { quelle: 'system', bezugId: 'maehroboter' })); });
   if (lesen_('Kreise').length) BEWAESSERUNG.forEach(function (r) { v.push(Object.assign({}, r, { quelle: 'system', bezugId: 'bewaesserung' })); });
-  return v;
+  const aus = ausgeblendet_();
+  return v.filter(function (x) { return !aus[[x.quelle, x.bezugId, x.vkey].join('|')]; });
 }
 
 /** Erzeugt fehlende Aufgaben für die nächsten 12 Monate und markiert lange Überfälliges als verpasst. */
@@ -515,8 +537,26 @@ function aufgabeAktion(id, aktion) {
       const bis = a.bis > addTage_(heute, 13) ? a.bis : addTage_(heute, 13);
       return aendern_('Aufgaben', id, { von: von, bis: bis, status: 'offen' });
     }
+    if (aktion === 'nichtMehrPlanen') {
+      if (!a.key) throw new Error('Diese Aufgabe ist nicht automatisch geplant – bitte einfach löschen.');
+      // Gilt auch für gleiche Pflanzen mit identischem Steckbrief
+      const basis = basisKey_(a.key), teile = basis.split('|');
+      const ziele = {};
+      ziele[basis] = true;
+      if (teile[0] === 'pflanze') {
+        const alle = lesen_('Pflanzen'), p = alle.find(function (x) { return x.id === teile[1]; });
+        if (p && p.profil) alle.forEach(function (x) { if (x.profil === p.profil) ziele[['pflanze', x.id, teile[2]].join('|')] = true; });
+      }
+      const aus = ausgeblendet_();
+      Object.keys(ziele).forEach(function (k) {
+        aus[k] = { titel: a.titel, kategorie: a.kategorie, bezugId: k.split('|')[1], datum: heute };
+      });
+      ausgeblendetSpeichern_(aus);
+      zeilenLoeschen_('Aufgaben', function (x) { return x.status === 'offen' && ziele[basisKey_(x.key)]; });
+      return Object.keys(ziele).length;
+    }
     if (aktion === 'loeschen') {
-      if (a.key) throw new Error('Geplante Aufgaben bitte überspringen statt löschen.');
+      if (a.key) throw new Error('Geplante Aufgaben bitte überspringen oder „Nicht mehr planen“ wählen.');
       zeilenLoeschen_('Aufgaben', function (x) { return x.id === id; });
       return null;
     }
@@ -538,6 +578,32 @@ function aufgabenErledigt(ids) {
       }
     });
     return n;
+  });
+}
+
+/** Ausgeblendete Vorlage wieder einplanen. */
+function wiederPlanen(basis) {
+  return mitSperre_(function () {
+    const aus = ausgeblendet_();
+    delete aus[basis];
+    ausgeblendetSpeichern_(aus);
+    syncAufgaben_();
+    return true;
+  });
+}
+
+/** Aufgabe ändern (Titel, Zeitraum, Hinweis, Material). Geplante Aufgaben behalten ihren Schlüssel und werden nicht doppelt angelegt. */
+function aendereAufgabe(id, d) {
+  return mitSperre_(function () {
+    if (!d || !String(d.titel || '').trim()) throw new Error('Bitte einen Titel eingeben.');
+    const a = finde_('Aufgaben', id);
+    const von = d.von || a.von;
+    const felder = {
+      titel: String(d.titel).trim(), kategorie: d.kategorie || a.kategorie, von: von, bis: d.bis && d.bis >= von ? d.bis : von,
+      hinweis: d.hinweis || '', material: d.material || ''
+    };
+    if (!a.key) felder.bezugId = d.bezugId || '';
+    return sauber_(aendern_('Aufgaben', id, felder));
   });
 }
 
@@ -643,6 +709,7 @@ function kontext_(d, flM) {
     name: d.name, botanisch: d.botanisch, sorte: d.sorte, haltung: d.haltung, bewaesserung: d.bewaesserung,
     bereich: f.bereich, licht: f.licht, boden: f.boden, flaeche: f.name, flaecheTyp: f.typ,
     winterquartier: w ? w.name + ' (' + (w.bereich === 'Drinnen' ? 'drinnen' : 'draußen') + (w.licht ? ', ' + w.licht : '') + ')' : '',
+    pflanzdatum: d.pflanzdatum || '',
     notiz: d.notiz || '', frostEigen: (d.frostEigen === '' || d.frostEigen === null || d.frostEigen === undefined) ? '' : d.frostEigen
   };
 }
@@ -657,6 +724,7 @@ function profilPrompt_(k) {
     'Haltung: ' + (k.haltung === 'Topf' ? 'im Topf/Kübel' : 'ausgepflanzt') + '\n' +
     (k.winterquartier ? 'Winterquartier: ' + k.winterquartier + '\n' :
       (k.haltung === 'Topf' && k.bereich !== 'Drinnen' ? 'Winterquartier: keins – die Pflanze bleibt im Winter draußen.\n' : '')) +
+    (k.pflanzdatum ? 'Gepflanzt: ' + String(k.pflanzdatum).slice(0, 10) + ' (heute ist ' + heute_() + ')\n' : 'Pflanzdatum unbekannt – die Pflanze steht schon länger und ist eingewachsen.\n') +
     (k.frostEigen !== '' ? 'Erfahrung des Besitzers: hält bei ihm bis ca. ' + k.frostEigen + ' °C aus.\n' : '') +
     (k.notiz ? 'Vorgehen und Hinweise des Besitzers (haben Vorrang vor allgemeinen Empfehlungen, Aufgaben danach ausrichten): ' + k.notiz + '\n' : '') +
     'Bewässerung: ' + (k.bewaesserung === 'Automatisch' ? 'automatische Bewässerung (Tropfer) vorhanden' : 'wird von Hand gegossen') + '\n\n' +
@@ -680,13 +748,16 @@ function profilPrompt_(k) {
     ' "giftigkeit": {"stufe": "ungiftig" | "leicht giftig" | "giftig" | "stark giftig", "text": "für Kinder und Haustiere (Hund, Katze): welche Teile, welche Wirkung"},\n' +
     ' "schaedlinge": "typische Schädlinge und Krankheiten, woran man sie erkennt, was vorbeugt",\n' +
     ' "tipps": ["2–4 kurze, konkrete Pflegetipps"],\n' +
-    ' "aufgaben": [{"kategorie": "Schnitt" | "Düngen" | "Winterschutz" | "Umtopfen" | "Pflege", "titel": "kurz, z. B. Rückschnitt", "von": "MM-TT", "bis": "MM-TT", "intervallTage": Zahl oder null, "hinweis": "wie genau", "material": "Einkaufsartikel oder leer"}]\n' +
+    ' "aufgaben": [{"kategorie": "Schnitt" | "Düngen" | "Winterschutz" | "Umtopfen" | "Pflege", "titel": "kurz, z. B. Rückschnitt", "von": "MM-TT", "bis": "MM-TT", "intervallTage": Zahl oder null, "nurJung": true | false, "hinweis": "wie genau", "material": "Einkaufsartikel oder leer"}]\n' +
     '}\n\n' +
     'Regeln für "aufgaben": nur Arbeiten, die in einem normalen Jahr ohne besondere Vorkommnisse tatsächlich erledigt werden müssen, mit realistischem Zeitfenster für Deutschland (MM-TT, z. B. "03-15"). ' +
     'KEINE Kontroll- oder Beobachtungsaufgaben wie "auf Schädlinge prüfen", "Blätter kontrollieren" oder "Zustand beobachten" – was man im Blick behalten sollte, gehört in "schaedlinge" bzw. "tipps". ' +
     'Schnitt hat Vorrang und soll vollständig sein. Düngen nur, wenn die Pflanze es wirklich braucht, mit so wenigen Gaben wie möglich; bevorzuge Langzeitdünger. ' +
     'Nur wenn regelmäßiges Flüssigdüngen unvermeidbar ist (z. B. Starkzehrer im Topf), EINE Aufgabe über den Zeitraum mit "intervallTage" (mindestens 21, eher 28); sonst intervallTage null. ' +
     'Bei Topfpflanzen mit Winterquartier: "Ins Winterquartier räumen" und "Ausräumen" mit Zeitfenster. Bleibt die Pflanze im Winter draußen, KEIN "Ins Winterquartier", sondern die nötigen Winterschutz-Maßnahmen am Standort und deren Abbau im Frühjahr. ' +
+    'Winterschutz-Aufgaben NUR, wenn die Pflanze in dieser Region und Haltung ohne Schutz tatsächlich Schaden nehmen würde: frostempfindliche Arten, Topfpflanzen mit Gefahr eines durchfrierenden Wurzelballens, oder junge Pflanzen in den ersten 1–2 Wintern nach der Pflanzung. ' +
+    'Eingewachsene, in Deutschland winterharte Gartenpflanzen bekommen KEINE Winterschutz-Aufgabe – dann im Feld "winter" kurz „kein Schutz nötig“. ' +
+    'Ist Winterschutz nur wegen des jungen Alters nötig, setze bei dieser Aufgabe "nurJung": true (sonst false). ' +
     'Hat der Besitzer sein Vorgehen beschrieben, plane genau dieses Vorgehen ein (mit passenden Zeitfenstern) statt allgemeiner Empfehlungen. ' +
     'Keine Gießaufgaben. Höchstens 8 Aufgaben. "material" nur, wenn etwas gekauft werden muss (z. B. "Rosendünger").';
 }
