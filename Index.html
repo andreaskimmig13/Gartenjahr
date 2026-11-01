@@ -178,7 +178,7 @@ const S = { d:null, tab:'aufgaben', katFilter:'Alle', flFilter:'', suche:'', meh
 const KAT = { 'Schnitt':'✂️','Düngen':'🧪','Rasen':'🟩','Mähroboter':'🤖','Bewässerung':'💧','Winterschutz':'❄️',
   'Umtopfen':'🪴','Pflege':'🌿','Pflanzenschutz':'🐛','Gießen':'🚿','Sonstiges':'📌' };
 const KATEGORIEN = Object.keys(KAT);
-const FL_TYPEN = ['Beet','Rasen','Hecke','Gehölz','Gemüse/Kräuter','Terrasse/Kübel','Balkon','Zimmer','Winterquartier','Sonstiges'];
+const FL_TYPEN = ['Beet','Rasen','Dachbegrünung','Hecke','Gehölz','Gemüse/Kräuter','Terrasse/Kübel','Balkon','Zimmer','Winterquartier','Sonstiges'];
 const FARBEN = ['#4c9a52','#d08a2e','#3f7fbf','#b5527a','#7b6bc4','#2e9c94','#c2543a','#8a9a2e','#5d6d7e'];
 
 function api(fn, ...args){
@@ -553,10 +553,11 @@ function renderPflanzenListe(){
   if(!S.d.flaechen.length) html = '<div class="leer">Lege zuerst unter <b>Mehr → Flächen</b> deine Beete, den Rasen und die Zimmer an.</div>';
   S.d.flaechen.forEach(f => {
     const pf = S.d.pflanzen.filter(p=>p.flaecheId===f.id && passt(p));
-    const rasen = f.typ==='Rasen' && !q;
-    if(!pf.length && !rasen) return;
+    const rasen = f.typ==='Rasen' && !q, dach = f.typ==='Dachbegrünung' && !q;
+    if(!pf.length && !rasen && !dach) return;
     html += '<h2 style="cursor:pointer" onclick="flaecheDetail(\''+f.id+'\')">'+(f.bereich==='Drinnen'?'🏠':'🌳')+' '+esc(f.name)+' <span class="sub">'+pf.length+'</span><span class="rechts sub">'+esc(f.licht||'')+'</span></h2><div class="karte">';
     if(rasen) html += '<div class="zeile" onclick="flaecheDetail(\''+f.id+'\')"><div class="thumb">🟩</div><div class="mitte"><div class="titel">Rasenpflege</div><div class="sub">Düngen, Vertikutieren, Sanden, Nachsaat – Jahresplan</div></div></div>';
+    if(dach) html += '<div class="zeile" onclick="flaecheDetail(\''+f.id+'\')"><div class="thumb">🌿</div><div class="mitte"><div class="titel">Dachbegrünung pflegen</div><div class="sub">Düngen und Unkraut entfernen – Jahresplan für die ganze Fläche</div></div></div>';
     html += pf.map(pflanzeZeile).join('') + '</div>';
   });
   const ohne = S.d.pflanzen.filter(p=>!S.flM[p.flaecheId] && passt(p));
@@ -842,6 +843,7 @@ function flaecheDetail(id){
   const aufg = S.d.aufgaben.filter(a=>a.status==='offen' && (a.bezugId===id || (S.pfM[a.bezugId]||{}).flaecheId===id)).sort((a,b)=>a.von<b.von?-1:1);
   let html = '<div><span class="badge">'+esc(f.bereich)+'</span><span class="badge">'+esc(f.typ)+'</span>'+(f.licht?'<span class="badge gelb">'+esc(f.licht)+'</span>':'')+'</div>'+
     abschnitt('🪨','Boden', f.boden) + abschnitt('📝','Notiz', f.notiz);
+  if(f.typ==='Dachbegrünung') html += '<div class="abschnitt"><p class="sub">Die Dachbegrünung wird als Ganzes gepflegt: im Frühjahr Unkraut entfernen und einmal düngen, im Herbst Unkraut entfernen und Abläufe freiräumen. Die einzelnen Pflanzen bekommen keine eigenen Aufgaben und keine Gieß- oder Frosthinweise – ihre Steckbriefe bleiben zum Nachlesen.</p></div>';
   if(f.typ==='Rasen') html += '<div class="abschnitt"><p class="sub">Der Rasen-Jahresplan (Düngen, Vertikutieren, Sanden, Nachsaat, Herbstdünger) wird automatisch eingeplant.</p></div>';
   html += '<div class="abschnitt"><h4>🌿 Pflanzen ('+pf.length+')</h4>'+(pf.length?'<div class="karte">'+pf.map(pflanzeZeile).join('')+'</div>':'<p class="sub">Noch keine.</p>')+
     '<button class="knopf zwei klein" style="margin-top:8px" onclick="neuePflanzeStart(\''+id+'\')">+ Pflanze hier anlegen</button></div>';
@@ -1077,7 +1079,7 @@ async function wiederPlanen(i){
 }
 function renderFlaechen(){
   const grp = b => S.d.flaechen.filter(f=>f.bereich===b);
-  const zeile = f => '<div class="zeile" onclick="flaecheDetail(\''+f.id+'\')"><div class="thumb">'+(f.typ==='Rasen'?'🟩':f.bereich==='Drinnen'?'🏠':'🌳')+'</div><div class="mitte"><div class="titel">'+esc(f.name)+'</div><div class="sub">'+esc(f.typ)+(f.licht?' · '+esc(f.licht):'')+' · '+S.d.pflanzen.filter(p=>p.flaecheId===f.id).length+' Pflanzen</div></div><span>›</span></div>';
+  const zeile = f => '<div class="zeile" onclick="flaecheDetail(\''+f.id+'\')"><div class="thumb">'+(f.typ==='Rasen'?'🟩':f.typ==='Dachbegrünung'?'🌿':f.bereich==='Drinnen'?'🏠':'🌳')+'</div><div class="mitte"><div class="titel">'+esc(f.name)+'</div><div class="sub">'+esc(f.typ)+(f.licht?' · '+esc(f.licht):'')+' · '+S.d.pflanzen.filter(p=>p.flaecheId===f.id).length+' Pflanzen</div></div><span>›</span></div>';
   let html = zurueck;
   if(!S.d.flaechen.length) html += '<div class="karte" style="padding:14px"><p style="margin:0">Lege hier deine Bereiche an, z. B. <b>Vorgarten</b>, <b>Staudenbeet</b>, <b>Rasen</b> (Typ Rasen – dann kommt der Rasen-Jahresplan automatisch), <b>Terrasse</b>, <b>Wohnzimmer</b> und ein <b>Winterquartier</b> für Kübelpflanzen.</p><button class="knopf voll" style="margin-top:10px" onclick="flaecheForm()">+ Erste Fläche anlegen</button></div>';
   ['Draußen','Drinnen'].forEach(b => { const l = grp(b); if(l.length) html += '<h2>'+b+'</h2><div class="karte">'+l.map(zeile).join('')+'</div>'; });

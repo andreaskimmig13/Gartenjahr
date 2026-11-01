@@ -4,7 +4,7 @@
  * KI: Claude API (Schlüssel in den Skripteigenschaften).
  * Wetter: Open-Meteo (kostenlos, ohne Schlüssel).
  */
-const VERSION = '1.0.18';
+const VERSION = '1.0.19';
 const TZ = 'Europe/Berlin';
 
 const TABELLEN = {
@@ -53,6 +53,19 @@ const RASEN = [
   { vkey: 'laub', kategorie: 'Rasen', titel: 'Laub vom Rasen entfernen', von: '10-15', bis: '11-30',
     hinweis: 'Liegendes Laub erstickt den Rasen und fördert Pilze. Regelmäßig abrechen.', material: '' }
 ];
+
+/** Extensive Dachbegrünung: Die Fläche wird als Ganzes gepflegt, die einzelnen Pflanzen bekommen keine eigenen Aufgaben. */
+const DACH = [
+  { vkey: 'dach-unkraut-fruehjahr', kategorie: 'Pflege', titel: 'Dachbegrünung: Unkraut und Sämlinge entfernen', von: '04-01', bis: '05-15',
+    hinweis: 'Fremdaufwuchs wie Gräser, Löwenzahn, Klee und vor allem Gehölzsämlinge (Birke, Ahorn, Weide) samt Wurzel ziehen – Gehölzwurzeln können die Abdichtung beschädigen. Dabei Kiesstreifen am Rand und Abläufe freiräumen.', material: '' },
+  { vkey: 'dach-duengen', kategorie: 'Düngen', titel: 'Dachbegrünung düngen', von: '04-01', bis: '05-15',
+    hinweis: 'Einmal im Jahr, am besten direkt nach dem Unkrautjäten und vor angekündigtem Regen. Spezieller Langzeitdünger für Dachbegrünung, sparsam nach Packungsangabe – zu viel Dünger fördert Unkraut und lässt die Sedum-Polster weich und anfällig werden. Kahle Stellen können gleichzeitig mit Sedum-Sprossen nachgestreut werden.', material: 'Langzeitdünger für Dachbegrünung' },
+  { vkey: 'dach-herbst', kategorie: 'Pflege', titel: 'Dachbegrünung: Unkraut entfernen, Abläufe freiräumen', von: '09-15', bis: '10-31',
+    hinweis: 'Fremdaufwuchs entfernen, bevor er Samen bildet bzw. sich festwurzelt. Laub und Pflanzenreste aus Abläufen, Rinnen und Kiesstreifen holen, damit das Wasser im Winter ablaufen kann.', material: '' }
+];
+/** Flächentypen mit festem Jahresplan für die ganze Fläche. */
+const FLAECHEN_PLAENE = { 'Rasen': RASEN, 'Dachbegrünung': DACH };
+function ganzeFlaeche_(f) { return !!(f && f.typ === 'Dachbegrünung'); }
 
 const BEWAESSERUNG = [
   { vkey: 'bew-start', kategorie: 'Bewässerung', titel: 'Bewässerung in Betrieb nehmen', von: '04-10', bis: '05-10',
@@ -435,9 +448,11 @@ function vorlagen_() {
   const s = einstellungen_();
   const heute = heute_();
   const v = [];
+  const flM = map_(lesen_('Flaechen'));
   lesen_('Pflanzen').forEach(function (p) {
     const prof = profil_(p.profil);
     if (!prof || !Array.isArray(prof.aufgaben)) return;
+    if (ganzeFlaeche_(flM[p.flaecheId])) return; // z. B. Dachbegrünung: Pflege über die Fläche
     prof.aufgaben.forEach(function (a) {
       if (!a || !a.titel || istKontrollaufgabe_(a) || winterschutzUnnoetig_(a, p, prof, heute)) return;
       v.push({
@@ -448,8 +463,7 @@ function vorlagen_() {
     });
   });
   lesen_('Flaechen').forEach(function (f) {
-    if (f.typ !== 'Rasen') return;
-    RASEN.forEach(function (r) { v.push(Object.assign({}, r, { quelle: 'flaeche', bezugId: f.id })); });
+    (FLAECHEN_PLAENE[f.typ] || []).forEach(function (r) { v.push(Object.assign({}, r, { quelle: 'flaeche', bezugId: f.id })); });
   });
   if (bool_(s.maehroboter)) robotVorlagen_(s).forEach(function (r) { v.push(Object.assign({}, r, { quelle: 'system', bezugId: 'maehroboter' })); });
   if (lesen_('Kreise').length) BEWAESSERUNG.forEach(function (r) { v.push(Object.assign({}, r, { quelle: 'system', bezugId: 'bewaesserung' })); });
@@ -681,14 +695,15 @@ function speichereFlaeche(d) {
     if (d.id) {
       const alt = finde_('Flaechen', d.id);
       f = aendern_('Flaechen', d.id, felder);
-      if (alt.typ === 'Rasen' && f.typ !== 'Rasen') {
+      if (alt.typ !== f.typ) {
         zeilenLoeschen_('Aufgaben', function (a) { return a.bezugId === f.id && a.quelle === 'flaeche' && a.status === 'offen'; });
+        syncAufgaben_();
       }
     } else {
       f = Object.assign({ id: id_('fl'), plan: '', angelegt: jetzt_() }, felder);
       einfuegen_('Flaechen', [f]);
     }
-    if (f.typ === 'Rasen') syncAufgaben_();
+    if (FLAECHEN_PLAENE[f.typ]) syncAufgaben_();
     return f;
   });
 }
@@ -791,6 +806,7 @@ function profilPrompt_(k) {
     'Verwende für Winterschutz-Aufgaben als "titel" ausschließlich diese Bezeichnungen: „Ins Winterquartier räumen“, „Aus dem Winterquartier räumen“, „Kübel einpacken“, „Krone mit Vlies schützen“, „Wurzelbereich abdecken“ (mit Laub, Reisig oder Stroh), „Anhäufeln“, „Winterschutz entfernen“; nur wenn keine davon passt, „Winterschutz anbringen“. ' +
     'Mehrere Maßnahmen zum selben Zeitpunkt als eigene Aufgaben; Material und Vorgehen gehören in "hinweis". ' +
     'Hat der Besitzer sein Vorgehen beschrieben, plane genau dieses Vorgehen ein (mit passenden Zeitfenstern) statt allgemeiner Empfehlungen. ' +
+    (k.flaecheTyp === 'Dachbegrünung' ? 'Die Pflanze wächst auf einer extensiven Dachbegrünung, die als Ganzes gepflegt wird: "aufgaben" leer lassen. ' : '') +
     'Keine Gießaufgaben. Höchstens 8 Aufgaben. "material" nur, wenn etwas gekauft werden muss (z. B. "Rosendünger").';
 }
 
@@ -1149,7 +1165,7 @@ function berechneHinweise_(fl, pf, tage, s, heute, aufgaben, hatKreise) {
     const f = flM[p.standort === 'Winter' && p.winterFlaecheId ? p.winterFlaecheId : p.flaecheId];
     return { p: p, prof: profil_(p.profil), f: f, imWinter: p.standort === 'Winter' };
   });
-  const draussen = liste.filter(function (x) { return x.f && x.f.bereich !== 'Drinnen' && !(x.imWinter && !x.p.winterFlaecheId); });
+  const draussen = liste.filter(function (x) { return x.f && x.f.bereich !== 'Drinnen' && !ganzeFlaeche_(x.f) && !(x.imWinter && !x.p.winterFlaecheId); });
 
   if (!tage) {
     out.push({ typ: 'info', titel: 'Ort fehlt', text: 'Trage unter Mehr → Einstellungen deinen Ort ein, dann warnt die App vor Frost und Trockenheit.', pflanzen: [] });
