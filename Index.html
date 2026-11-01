@@ -117,6 +117,8 @@ textarea{min-height:70px;resize:vertical}
 .plan-svg polygon{cursor:pointer}
 .marker{position:absolute;transform:translate(-50%,-50%);width:26px;height:26px;border-radius:50%;background:#fff;border:2px solid var(--gruen);display:grid;place-items:center;font-size:11px;font-weight:700;color:#24552e;box-shadow:0 1px 4px rgba(0,0,0,.4);cursor:pointer}
 .marker.neu{background:#ffd54d;border-color:#8a6d00}
+.marker .nm{position:absolute;top:27px;left:50%;transform:translateX(-50%);white-space:nowrap;font-size:10px;font-weight:700;background:rgba(255,255,255,.88);color:#1f2a21;padding:0 4px;border-radius:4px;pointer-events:none}
+.plan-svg polygon.blass{pointer-events:none}
 .fl-label{position:absolute;transform:translate(-50%,-50%);background:rgba(255,255,255,.85);color:#1f2a21;font-size:11px;font-weight:700;padding:1px 6px;border-radius:6px;pointer-events:none;white-space:nowrap}
 .punkt{position:absolute;transform:translate(-50%,-50%);width:10px;height:10px;border-radius:50%;background:#ffd54d;border:2px solid #000;pointer-events:none}
 .modus{background:var(--gelb-hell);color:var(--gelb);border-radius:10px;padding:8px 12px;margin-bottom:8px;font-size:14px}
@@ -173,7 +175,7 @@ textarea{min-height:70px;resize:vertical}
 <script>
 /* ================= Grundlagen ================= */
 const S = { d:null, tab:'aufgaben', katFilter:'Alle', flFilter:'', suche:'', mehr:'', offenErledigt:false,
-  plan:{ bild:null, zoom:1, modus:'ansehen', punkte:[], ziel:null }, tmp:{} };
+  plan:{ bild:null, zoom:1, modus:'ansehen', punkte:[], ziel:null, fokus:null, fitNeu:false, alleMarker:false }, tmp:{} };
 
 const KAT = { 'Schnitt':'✂️','Düngen':'🧪','Rasen':'🟩','Mähroboter':'🤖','Bewässerung':'💧','Winterschutz':'❄️',
   'Umtopfen':'🪴','Pflege':'🌿','Pflanzenschutz':'🐛','Gießen':'🚿','Sonstiges':'📌' };
@@ -848,7 +850,7 @@ function flaecheDetail(id){
   html += '<div class="abschnitt"><h4>🌿 Pflanzen ('+pf.length+')</h4>'+(pf.length?'<div class="karte">'+pf.map(pflanzeZeile).join('')+'</div>':'<p class="sub">Noch keine.</p>')+
     '<button class="knopf zwei klein" style="margin-top:8px" onclick="neuePflanzeStart(\''+id+'\')">+ Pflanze hier anlegen</button></div>';
   html += '<div class="abschnitt"><h4>✅ Offene Aufgaben ('+aufg.length+')</h4>'+(aufg.length?'<div class="karte">'+aufg.slice(0,12).map(aufgabeZeile).join('')+'</div>':'<p class="sub">Keine.</p>')+'</div>';
-  html += '<div class="reihe" style="margin-top:18px"><button class="knopf zwei" onclick="flaecheForm(\''+id+'\')">✏️ Bearbeiten</button></div>';
+  html += '<div class="reihe" style="margin-top:18px">'+(planPunkte(f) && S.d.einstellungen.hatPlan ? '<button class="knopf zwei" onclick="planZeigen(\''+id+'\')">🗺️ Im Plan</button>' : '')+'<button class="knopf zwei" onclick="flaecheForm(\''+id+'\')">✏️ Bearbeiten</button></div>';
   sheet((f.bereich==='Drinnen'?'🏠 ':'🌳 ')+esc(f.name), html);
 }
 function flaecheForm(id){
@@ -913,60 +915,116 @@ async function renderPlan(){
   }
   zeichnePlan();
 }
+const ZOOM_TASTEN = '<span style="margin-left:auto"></span><button class="knopf klein zwei" onclick="planZoom(-1)">−</button><button class="knopf klein zwei" onclick="planZoom(1)">+</button>';
+function planPunkte(f){ try { const p = f && f.plan ? JSON.parse(f.plan) : null; return p && p.length>=3 ? p : null; } catch(e){ return null; } }
 function zeichnePlan(){
   const P = S.plan;
+  const alt = $('planWrap'), scroll = alt ? [alt.scrollLeft, alt.scrollTop] : null;
   const draussen = S.d.flaechen.filter(f=>f.bereich!=='Drinnen');
+  const fokus = P.fokus && S.flM[P.fokus] ? S.flM[P.fokus] : null;
+  if(!fokus) P.fokus = null;
   let leiste = '';
-  if(P.modus==='ansehen'){
+  if(P.modus==='ansehen' && fokus){
+    leiste = '<div class="plan-leiste"><button class="knopf klein zwei" onclick="planUebersicht()">‹ Übersicht</button><b style="margin:0 4px">'+esc(fokus.name)+'</b></div>'+
+      '<div class="plan-leiste"><button class="knopf klein" onclick="flaecheDetail(\''+fokus.id+'\')">📋 Liste</button><button class="knopf klein" onclick="planPflanzeWaehlen(\''+fokus.id+'\')">🌿 Platzieren</button><button class="knopf klein zwei" onclick="planStartZeichnenAusFokus()">Umriss</button>'+ZOOM_TASTEN+'</div>';
+  } else if(P.modus==='ansehen'){
     leiste = '<div class="plan-leiste"><button class="knopf klein" onclick="planFlaecheWaehlen()">▦ Fläche einzeichnen</button><button class="knopf klein" onclick="planPflanzeWaehlen()">🌿 Pflanze setzen</button>'+
-      '<span style="margin-left:auto"></span><button class="knopf klein zwei" onclick="planZoom(-1)">−</button><button class="knopf klein zwei" onclick="planZoom(1)">+</button></div>';
+      '<button class="knopf klein zwei" onclick="S.plan.alleMarker=!S.plan.alleMarker;zeichnePlan()">'+(P.alleMarker?'Pflanzen ausblenden':'Pflanzen einblenden')+'</button>'+ZOOM_TASTEN+'</div>';
   } else if(P.modus==='zeichnen'){
     leiste = '<div class="modus">Tippe die Ecken von <b>'+esc(S.flM[P.ziel].name)+'</b> nacheinander an ('+P.punkte.length+' Punkte).</div>'+
       '<div class="plan-leiste"><button class="knopf klein" onclick="planFertig()" '+(P.punkte.length<3?'disabled':'')+'>✓ Fertig</button><button class="knopf klein zwei" onclick="P_undo()">↶ Zurück</button><button class="knopf klein zwei" onclick="planAbbruch()">Abbrechen</button>'+
-      (S.flM[P.ziel].plan?'<button class="knopf klein rot" onclick="planFlaecheEntfernen()">Umriss entfernen</button>':'')+
-      '<span style="margin-left:auto"></span><button class="knopf klein zwei" onclick="planZoom(-1)">−</button><button class="knopf klein zwei" onclick="planZoom(1)">+</button></div>';
+      (S.flM[P.ziel].plan?'<button class="knopf klein rot" onclick="planFlaecheEntfernen()">Umriss entfernen</button>':'')+ZOOM_TASTEN+'</div>';
   } else {
     leiste = '<div class="modus">Tippe auf die Stelle, an der <b>'+esc(S.pfM[P.ziel].name)+'</b> steht.</div>'+
       '<div class="plan-leiste"><button class="knopf klein zwei" onclick="planAbbruch()">Abbrechen</button>'+
-      (S.pfM[P.ziel].planX!==''?'<button class="knopf klein rot" onclick="planPflanzeEntfernen()">Vom Plan nehmen</button>':'')+
-      '<span style="margin-left:auto"></span><button class="knopf klein zwei" onclick="planZoom(-1)">−</button><button class="knopf klein zwei" onclick="planZoom(1)">+</button></div>';
+      (S.pfM[P.ziel].planX!==''?'<button class="knopf klein rot" onclick="planPflanzeEntfernen()">Vom Plan nehmen</button>':'')+ZOOM_TASTEN+'</div>';
   }
   let svg = '', labels = '', marker = '';
   draussen.forEach(f => {
-    let pts; try { pts = f.plan ? JSON.parse(f.plan) : null; } catch(e){ pts=null; }
-    if(!pts || pts.length<3) return;
-    const c = flFarbe(f.id);
-    svg += '<polygon points="'+pts.map(p=>p[0]+','+p[1]).join(' ')+'" fill="'+c+'" fill-opacity="0.28" stroke="'+c+'" stroke-width="2" vector-effect="non-scaling-stroke" onclick="planFlaecheKlick(event,\''+f.id+'\')"/>';
-    const cx = pts.reduce((s,p)=>s+p[0],0)/pts.length, cy = pts.reduce((s,p)=>s+p[1],0)/pts.length;
-    labels += '<div class="fl-label" style="left:'+(cx*100)+'%;top:'+(cy*100)+'%">'+esc(f.name)+'</div>';
+    const pts = planPunkte(f); if(!pts) return;
+    const c = flFarbe(f.id), blass = fokus && f.id!==fokus.id;
+    svg += '<polygon class="'+(blass||fokus?'blass':'')+'" points="'+pts.map(p=>p[0]+','+p[1]).join(' ')+'" fill="'+c+'" fill-opacity="'+(blass?0.08:fokus?0.15:0.28)+'" stroke="'+c+'" stroke-opacity="'+(blass?0.35:1)+'" stroke-width="2" vector-effect="non-scaling-stroke" onclick="planFlaecheKlick(event,\''+f.id+'\')"/>';
+    if(!fokus){
+      const cx = pts.reduce((s,p)=>s+p[0],0)/pts.length, cy = pts.reduce((s,p)=>s+p[1],0)/pts.length;
+      labels += '<div class="fl-label" style="left:'+(cx*100)+'%;top:'+(cy*100)+'%">'+esc(f.name)+'</div>';
+    }
   });
   if(P.modus==='zeichnen' && P.punkte.length){
     svg += '<polyline points="'+P.punkte.map(p=>p[0]+','+p[1]).join(' ')+'" fill="none" stroke="#ffd54d" stroke-width="3" vector-effect="non-scaling-stroke"/>';
     labels += P.punkte.map(p=>'<div class="punkt" style="left:'+(p[0]*100)+'%;top:'+(p[1]*100)+'%"></div>').join('');
   }
+  // Pflanzen: in der Übersicht nur auf Wunsch, in der Flächenansicht die Pflanzen dieser Fläche (mit Namen)
   S.d.pflanzen.forEach(p => {
     if(p.planX==='' || p.planX===undefined || p.standort==='Winter') return;
+    const ziel = P.modus==='setzen' && P.ziel===p.id;
+    if(!ziel){
+      if(fokus && p.flaecheId!==fokus.id) return;
+      if(!fokus && !P.alleMarker && P.modus==='ansehen') return;
+      if(!fokus && P.modus!=='ansehen' && !P.alleMarker) return;
+    }
     const k = p.name.split(/\s+/).map(w=>w[0]).join('').slice(0,2).toUpperCase();
-    marker += '<div class="marker'+(P.modus==='setzen'&&P.ziel===p.id?' neu':'')+'" style="left:'+(Number(p.planX)*100)+'%;top:'+(Number(p.planY)*100)+'%" title="'+esc(p.name)+'" onclick="planMarkerKlick(event,\''+p.id+'\')">'+esc(k)+'</div>';
+    marker += '<div class="marker'+(ziel?' neu':'')+'" style="left:'+(Number(p.planX)*100)+'%;top:'+(Number(p.planY)*100)+'%" title="'+esc(p.name)+'" onclick="planMarkerKlick(event,\''+p.id+'\')">'+esc(k)+
+      (fokus?'<span class="nm">'+esc(p.name)+'</span>':'')+'</div>';
   });
-  const ohneUmriss = draussen.filter(f=>!f.plan);
-  const ohnePunkt = S.d.pflanzen.filter(p=>p.planX==='' && (S.flM[p.flaecheId]||{}).bereich!=='Drinnen');
+  const ohneUmriss = draussen.filter(f=>!planPunkte(f));
+  const ohnePunkt = S.d.pflanzen.filter(p=>p.planX==='' && (S.flM[p.flaecheId]||{}).bereich!=='Drinnen' && (!fokus || p.flaecheId===fokus.id));
   $('inhalt').innerHTML = leiste +
-    '<div class="plan-wrap"><div class="plan-inner" id="planInner" style="width:'+(P.zoom*100)+'%" onclick="planKlick(event)"><img src="'+esc(P.bild)+'" draggable="false"><svg class="plan-svg" viewBox="0 0 1 1" preserveAspectRatio="none">'+svg+'</svg>'+labels+marker+'</div></div>'+
-    (P.modus==='ansehen' ? (
-      (ohneUmriss.length?'<p class="sub" style="margin-top:10px">Noch nicht eingezeichnet: '+ohneUmriss.map(f=>esc(f.name)).join(', ')+'</p>':'')+
+    '<div class="plan-wrap" id="planWrap"><div class="plan-inner" id="planInner" style="width:'+(P.zoom*100)+'%" onclick="planKlick(event)"><img src="'+esc(P.bild)+'" draggable="false"><svg class="plan-svg" viewBox="0 0 1 1" preserveAspectRatio="none">'+svg+'</svg>'+labels+marker+'</div></div>'+
+    (P.modus==='ansehen' ? (fokus ?
+      (ohnePunkt.length?'<p class="sub" style="margin-top:10px">Noch nicht platziert: '+ohnePunkt.map(p=>esc(p.name)).join(', ')+'</p>':'') :
+      '<p class="klein" style="margin-top:10px">Tippe auf eine Fläche, um sie heranzuholen und ihre Pflanzen zu sehen.</p>'+
+      (ohneUmriss.length?'<p class="sub">Noch nicht eingezeichnet: '+ohneUmriss.map(f=>esc(f.name)).join(', ')+'</p>':'')+
       (ohnePunkt.length?'<p class="sub">Noch nicht platziert: '+ohnePunkt.length+' Pflanze(n)</p>':'')+
       '<button class="knopf klein zwei" style="margin-top:12px" onclick="planHochladen()">Screenshot ersetzen</button>') : '');
+  const wrap = $('planWrap');
+  if(P.fitNeu && fokus){
+    const img = wrap.querySelector('img');
+    const fit = () => { P.fitNeu = false; planEinpassen(fokus); };
+    if(img.complete && img.naturalWidth) fit(); else img.onload = fit;
+  } else if(scroll){ wrap.scrollLeft = scroll[0]; wrap.scrollTop = scroll[1]; }
 }
-function planZoom(r){ const z=[1,1.5,2,3,4]; let i=z.indexOf(S.plan.zoom); i=Math.max(0,Math.min(z.length-1,i+r)); S.plan.zoom=z[i]; zeichnePlan(); }
+/** Zoomt so, dass die Fläche den Ausschnitt füllt, und scrollt dorthin. */
+function planEinpassen(f){
+  const P = S.plan, pts = planPunkte(f); if(!pts) return;
+  const wrap = $('planWrap'), img = wrap.querySelector('img');
+  const pad = 0.03;
+  let x0 = Math.max(0, Math.min(...pts.map(p=>p[0])) - pad), x1 = Math.min(1, Math.max(...pts.map(p=>p[0])) + pad);
+  let y0 = Math.max(0, Math.min(...pts.map(p=>p[1])) - pad), y1 = Math.min(1, Math.max(...pts.map(p=>p[1])) + pad);
+  const cw = wrap.clientWidth, ch = Math.round(window.innerHeight * 0.7);
+  const ratio = img.naturalHeight / img.naturalWidth;
+  const z = Math.max(1, Math.min(8, 1/(x1-x0), ch / ((y1-y0) * cw * ratio)));
+  P.zoom = z;
+  $('planInner').style.width = (z*100)+'%';
+  const bw = cw*z, bh = cw*z*ratio, vh = wrap.clientHeight;
+  wrap.scrollLeft = Math.max(0, x0*bw - (cw - (x1-x0)*bw)/2);
+  wrap.scrollTop = Math.max(0, y0*bh - (vh - (y1-y0)*bh)/2);
+}
+function planFokus(id){ Object.assign(S.plan, {fokus:id, fitNeu:true, modus:'ansehen', ziel:null}); zeichnePlan(); }
+function planUebersicht(){ Object.assign(S.plan, {fokus:null, zoom:1, modus:'ansehen', ziel:null}); zeichnePlan(); }
+function planZeigen(id){ sheetZu(); S.tab='plan'; Object.assign(S.plan, {fokus:id, fitNeu:true, modus:'ansehen', ziel:null}); window.scrollTo(0,0); render(); }
+function planZoom(r){
+  const wrap = $('planWrap'), P = S.plan;
+  const mx = wrap ? (wrap.scrollLeft + wrap.clientWidth/2) / wrap.scrollWidth : .5, my = wrap ? (wrap.scrollTop + wrap.clientHeight/2) / wrap.scrollHeight : .5;
+  P.zoom = Math.max(1, Math.min(8, r>0 ? P.zoom*1.5 : P.zoom/1.5));
+  if(P.zoom < 1.05) P.zoom = 1;
+  zeichnePlan();
+  const w = $('planWrap'); w.scrollLeft = mx*w.scrollWidth - w.clientWidth/2; w.scrollTop = my*w.scrollHeight - w.clientHeight/2;
+}
 function planKoord(ev){ const r=$('planInner').getBoundingClientRect(); return [Math.max(0,Math.min(1,(ev.clientX-r.left)/r.width)), Math.max(0,Math.min(1,(ev.clientY-r.top)/r.height))]; }
 function planKlick(ev){
   const P = S.plan;
   if(P.modus==='zeichnen'){ P.punkte.push(planKoord(ev).map(v=>Math.round(v*10000)/10000)); zeichnePlan(); }
   else if(P.modus==='setzen'){ const [x,y]=planKoord(ev); planPflanzeSpeichern(x,y); }
 }
-function planFlaecheKlick(ev, id){ if(S.plan.modus!=='ansehen') return; ev.stopPropagation(); flaecheDetail(id); }
-function planMarkerKlick(ev, id){ if(S.plan.modus!=='ansehen') return; ev.stopPropagation(); pflanzeDetail(id); }
+function planFlaecheKlick(ev, id){ if(S.plan.modus!=='ansehen' || S.plan.fokus) return; ev.stopPropagation(); planFokus(id); }
+function planMarkerKlick(ev, id){
+  if(S.plan.modus!=='ansehen') return; ev.stopPropagation();
+  const p = S.pfM[id];
+  sheet('🌿 '+esc(p.name), '<div class="sub">'+esc((S.flM[p.flaecheId]||{}).name||'')+'</div><div style="display:grid;gap:8px;margin-top:12px">'+
+    '<button class="knopf" onclick="pflanzeDetail(\''+id+'\')">Steckbrief öffnen</button>'+
+    '<button class="knopf zwei" onclick="planStartSetzen(\''+id+'\')">✥ Verschieben</button>'+
+    '<button class="knopf zwei" onclick="sheetZu();S.plan.ziel=\''+id+'\';planPflanzeEntfernen()">Vom Plan nehmen</button></div>');
+}
 function planFlaecheWaehlen(){
   const fl = S.d.flaechen.filter(f=>f.bereich!=='Drinnen');
   if(!fl.length) return toast('Lege zuerst Flächen an (Mehr → Flächen).', true);
@@ -975,6 +1033,7 @@ function planFlaecheWaehlen(){
 function planStartZeichnen(id){ sheetZu(); Object.assign(S.plan, {modus:'zeichnen', ziel:id, punkte:[]}); zeichnePlan(); }
 function P_undo(){ S.plan.punkte.pop(); zeichnePlan(); }
 function planAbbruch(){ Object.assign(S.plan, {modus:'ansehen', ziel:null, punkte:[]}); zeichnePlan(); }
+function planStartZeichnenAusFokus(){ const id=S.plan.fokus; S.plan.fokus=null; S.plan.zoom=1; planStartZeichnen(id); }
 async function planFertig(){
   const P = S.plan; if(P.punkte.length<3) return;
   await mit('Speichere …', ()=>api('speicherePlanFlaeche', P.ziel, JSON.stringify(P.punkte)));
@@ -985,13 +1044,20 @@ async function planFlaecheEntfernen(){
   await mit('Speichere …', ()=>api('speicherePlanFlaeche', S.plan.ziel, ''));
   S.flM[S.plan.ziel].plan = ''; planAbbruch();
 }
-function planPflanzeWaehlen(){
-  const pf = S.d.pflanzen.filter(p=>(S.flM[p.flaecheId]||{}).bereich!=='Drinnen');
+function planPflanzeWaehlen(flId){
+  const pf = S.d.pflanzen.filter(p=>(S.flM[p.flaecheId]||{}).bereich!=='Drinnen' && (!flId || p.flaecheId===flId));
   if(!pf.length) return toast('Noch keine Pflanzen draußen angelegt.', true);
   pf.sort((a,b)=> (a.planX===''?0:1)-(b.planX===''?0:1));
   sheet('Welche Pflanze setzen?', '<div class="karte">'+pf.map(p=>'<div class="zeile" onclick="planStartSetzen(\''+p.id+'\')">'+(p.thumb?'<img class="thumb" src="'+esc(p.thumb)+'">':'<div class="thumb">🌱</div>')+'<div class="mitte"><div class="titel">'+esc(p.name)+'</div><div class="sub">'+esc((S.flM[p.flaecheId]||{}).name||'')+' · '+(p.planX===''?'noch nicht platziert':'versetzen')+'</div></div></div>').join('')+'</div>');
 }
-function planStartSetzen(id){ sheetZu(); Object.assign(S.plan, {modus:'setzen', ziel:id}); zeichnePlan(); }
+function planStartSetzen(id){
+  sheetZu();
+  const f = S.flM[S.pfM[id].flaecheId];
+  const neuFokus = planPunkte(f) && S.plan.fokus!==f.id;
+  Object.assign(S.plan, {modus:'setzen', ziel:id});
+  if(neuFokus){ S.plan.fokus = f.id; S.plan.fitNeu = true; }
+  zeichnePlan();
+}
 async function planPflanzeSpeichern(x, y){
   const id = S.plan.ziel;
   await mit('Speichere …', ()=>api('speicherePlanPflanze', id, x, y));
@@ -1008,7 +1074,7 @@ async function planHochladen(){
   try { foto = await fotoHolen(2200, true); } catch(e){ return fehler(e); }
   if(!foto) return;
   await mit('Lade Plan hoch …', ()=>api('speicherePlanBild', foto.bild));
-  S.plan.bild = foto.bild; S.d.einstellungen.hatPlan = true; S.plan.zoom = 1;
+  S.plan.bild = foto.bild; S.d.einstellungen.hatPlan = true; S.plan.zoom = 1; S.plan.fokus = null;
   render(); toast('Plan gespeichert');
 }
 

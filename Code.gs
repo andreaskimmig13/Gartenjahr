@@ -4,7 +4,7 @@
  * KI: Claude API (Schlüssel in den Skripteigenschaften).
  * Wetter: Open-Meteo (kostenlos, ohne Schlüssel).
  */
-const VERSION = '1.0.19';
+const VERSION = '1.0.20';
 const TZ = 'Europe/Berlin';
 
 const TABELLEN = {
