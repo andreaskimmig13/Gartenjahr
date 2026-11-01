@@ -470,12 +470,10 @@ async function aufgabeSpeichern(editId){
 /* ================= Pflanzen ================= */
 function pflanzeZeile(p){
   const prof = p.prof || {};
-  const gift = prof.giftigkeit && /giftig/.test(prof.giftigkeit.stufe||'') && prof.giftigkeit.stufe!=='ungiftig';
   const badges = [
     p.haltung==='Topf' ? '<span class="badge">🪴 Topf</span>' : '',
     p.bewaesserung==='Automatisch' ? '<span class="badge blau">💧 '+esc((S.krM[p.kreisId]||{}).name||'automatisch')+'</span>' : '',
-    p.standort==='Winter' ? '<span class="badge blau">❄️ Winterquartier</span>' : '',
-    gift ? '<span class="badge rot">☠️ '+esc(prof.giftigkeit.stufe)+'</span>' : ''
+    p.standort==='Winter' ? '<span class="badge blau">❄️ Winterquartier</span>' : ''
   ].join('');
   return '<div class="zeile" onclick="pflanzeDetail(\''+p.id+'\')">'+
     (p.thumb ? '<img class="thumb" src="'+esc(p.thumb)+'">' : '<div class="thumb">🌱</div>')+
