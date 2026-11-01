@@ -4,7 +4,7 @@
  * KI: Claude API (Schlüssel in den Skripteigenschaften).
  * Wetter: Open-Meteo (kostenlos, ohne Schlüssel).
  */
-const VERSION = '1.0.21';
+const VERSION = '1.0.22';
 const TZ = 'Europe/Berlin';
 
 const TABELLEN = {
@@ -429,9 +429,14 @@ function ausgeblendet_() { return parse_(prop_('AUSGEBLENDET')) || {}; }
 function ausgeblendetSpeichern_(o) { setProp_('AUSGEBLENDET', JSON.stringify(o)); }
 function basisKey_(key) { return String(key || '').split('|').slice(0, 3).join('|'); }
 
-/** Ist die Pflanze noch jung (Pflanzdatum innerhalb der letzten 18 Monate)? Ohne Datum gilt sie als eingewachsen. */
+/** Ist die Pflanze noch jung, d. h. hat sie noch keinen vollen Winter am Standort hinter sich?
+ *  Ein Winter zählt als überstanden, wenn sie vor dem 1. Dezember gepflanzt wurde und seitdem ein 1. März vergangen ist.
+ *  Ohne Pflanzdatum gilt sie als eingewachsen. */
 function istJung_(p, heute) {
-  return !!(p.pflanzdatum && diffTage_(String(p.pflanzdatum).slice(0, 10), heute) < 550);
+  if (!p.pflanzdatum) return false;
+  const j = Number(heute.slice(0, 4));
+  const letzterWinterStart = (heute.slice(5, 10) >= '03-01' ? j - 1 : j - 2) + '-12-01';
+  return String(p.pflanzdatum).slice(0, 10) >= letzterWinterStart;
 }
 /** Einheitliche Bezeichnungen für Winterschutz-Maßnahmen. Die Details stehen im Hinweis der Aufgabe. */
 const WINTER_TITEL = [
@@ -819,7 +824,7 @@ function profilPrompt_(k) {
     'Schnitt hat Vorrang und soll vollständig sein. Düngen nur, wenn die Pflanze es wirklich braucht, mit so wenigen Gaben wie möglich; bevorzuge Langzeitdünger. ' +
     'Nur wenn regelmäßiges Flüssigdüngen unvermeidbar ist (z. B. Starkzehrer im Topf), EINE Aufgabe über den Zeitraum mit "intervallTage" (mindestens 21, eher 28); sonst intervallTage null. ' +
     'Bei Topfpflanzen mit Winterquartier: "Ins Winterquartier räumen" und "Ausräumen" mit Zeitfenster. Bleibt die Pflanze im Winter draußen, KEIN "Ins Winterquartier", sondern die nötigen Winterschutz-Maßnahmen am Standort und deren Abbau im Frühjahr. ' +
-    'Winterschutz-Aufgaben NUR, wenn die Pflanze in dieser Region und Haltung ohne Schutz tatsächlich Schaden nehmen würde: frostempfindliche Arten, Topfpflanzen mit Gefahr eines durchfrierenden Wurzelballens, oder junge Pflanzen in den ersten 1–2 Wintern nach der Pflanzung. ' +
+    'Winterschutz-Aufgaben NUR, wenn die Pflanze in dieser Region und Haltung ohne Schutz tatsächlich Schaden nehmen würde: frostempfindliche Arten, Topfpflanzen mit Gefahr eines durchfrierenden Wurzelballens, oder junge Pflanzen im ersten Winter nach der Pflanzung. ' +
     'Eingewachsene, in Deutschland winterharte Gartenpflanzen bekommen KEINE Winterschutz-Aufgabe – dann im Feld "winter" kurz „kein Schutz nötig“. ' +
     'Ist Winterschutz nur wegen des jungen Alters nötig, setze bei dieser Aufgabe "nurJung": true (sonst false). ' +
     'Verwende für Winterschutz-Aufgaben als "titel" ausschließlich diese Bezeichnungen: „Ins Winterquartier räumen“, „Aus dem Winterquartier räumen“, „Kübel einpacken“, „Krone mit Vlies schützen“, „Wurzelbereich abdecken“ (mit Laub, Reisig oder Stroh), „Anhäufeln“, „Winterschutz entfernen“; nur wenn keine davon passt, „Winterschutz anbringen“. ' +
