@@ -4,7 +4,7 @@
  * KI: Claude API (Schlüssel in den Skripteigenschaften).
  * Wetter: Open-Meteo (kostenlos, ohne Schlüssel).
  */
-const VERSION = '1.0.17';
+const VERSION = '1.0.18';
 const TZ = 'Europe/Berlin';
 
 const TABELLEN = {
@@ -401,12 +401,31 @@ function basisKey_(key) { return String(key || '').split('|').slice(0, 3).join('
 function istJung_(p, heute) {
   return !!(p.pflanzdatum && diffTage_(String(p.pflanzdatum).slice(0, 10), heute) < 550);
 }
+/** Einheitliche Bezeichnungen für Winterschutz-Maßnahmen. Die Details stehen im Hinweis der Aufgabe. */
+const WINTER_TITEL = [
+  ['Ins Winterquartier räumen', /winterquartier|einräum|einraeum|reinstell|reinhol|hereinhol|ins haus/i],
+  ['Kübel einpacken', /kübel|kuebel|topf|einpack|jute|noppenfolie|luftpolster/i],
+  ['Wurzelbereich abdecken', /mulch|wurzel|laub|reisig|stroh|fichtenzweig|tannenzweig|abdeck/i],
+  ['Anhäufeln', /anhäuf|anhaeuf|häufeln|haeufeln/i],
+  ['Krone mit Vlies schützen', /vlies|krone|haube|überzieh|ueberzieh|einhüll|einhuell/i]
+];
+/** Ordnet einen frei formulierten Winterschutz-Titel den einheitlichen Bezeichnungen zu. */
+function winterTitel_(titel) {
+  const t = String(titel || '');
+  if (/entfern|abbau|abnehm|ausräum|ausraeum|ins freie|rausstell|aufdeck|auspack/i.test(t)) {
+    return /winterquartier|ausräum|ausraeum|ins freie|rausstell/i.test(t) ? 'Aus dem Winterquartier räumen' : 'Winterschutz entfernen';
+  }
+  const treffer = WINTER_TITEL.filter(function (w) { return w[1].test(t); }).map(function (w) { return w[0]; });
+  if (treffer.indexOf('Ins Winterquartier räumen') >= 0) return 'Ins Winterquartier räumen';
+  return treffer.length ? treffer.join(' + ') : t;
+}
+
 /** Winterschutz ist bei eingewachsenen, ausgepflanzten Pflanzen, die bis -10 °C winterhart sind, unnötig.
  *  Bei strengerem Frost warnt die Frostwarnung gezielt (berechneHinweise_). */
 function winterschutzUnnoetig_(a, p, prof, heute) {
   if (a.kategorie !== 'Winterschutz') return false;
   if (/winterquartier|ausräumen|ausraeumen|einräumen|einraeumen/i.test(String(a.titel || ''))) return false;
-  if (a.nurJung && !istJung_(p, heute)) return true;
+  if ((a.nurJung || /jung/i.test(String(a.titel || ''))) && !istJung_(p, heute)) return true;
   if (p.haltung === 'Topf' || istJung_(p, heute)) return false;
   const g = (prof.frostgrenzeEigen !== undefined && prof.frostgrenzeEigen !== null && prof.frostgrenzeEigen !== '') ? Number(prof.frostgrenzeEigen) : Number(prof.frostgrenze);
   return !isNaN(g) && prof.frostgrenze !== null && g <= -10;
@@ -423,7 +442,7 @@ function vorlagen_() {
       if (!a || !a.titel || istKontrollaufgabe_(a) || winterschutzUnnoetig_(a, p, prof, heute)) return;
       v.push({
         quelle: 'pflanze', bezugId: p.id, vkey: slug_((a.kategorie || '') + '-' + a.titel),
-        kategorie: a.kategorie || 'Pflege', titel: a.titel, von: a.von, bis: a.bis,
+        kategorie: a.kategorie || 'Pflege', titel: a.kategorie === 'Winterschutz' ? winterTitel_(a.titel) : a.titel, rohTitel: a.titel, von: a.von, bis: a.bis,
         intervallTage: a.intervallTage, hinweis: a.hinweis || '', material: a.material || ''
       });
     });
@@ -445,6 +464,16 @@ function syncAufgaben_() {
   // Offene geplante Aufgaben entfernen, deren Vorlage es nicht mehr gibt (z. B. reine Kontrollaufgaben)
   const weg = veralteteAufgaben_(lesen_('Aufgaben'), vorlagen, heute);
   if (weg.length) { const set = {}; weg.forEach(function (id) { set[id] = true; }); zeilenLoeschen_('Aufgaben', function (a) { return set[a.id]; }); }
+  // Vereinheitlichte Titel auf bereits geplante, offene Aufgaben übertragen (selbst geänderte Titel bleiben)
+  const umbenennen = {};
+  vorlagen.forEach(function (v) { if (v.rohTitel && v.rohTitel !== v.titel) umbenennen[[v.quelle, v.bezugId, v.vkey].join('|')] = v; });
+  if (Object.keys(umbenennen).length) {
+    const shU = blatt_('Aufgaben'), spT = TABELLEN.Aufgaben.indexOf('titel') + 1;
+    lesen_('Aufgaben').forEach(function (a) {
+      const v = a.status === 'offen' && a.key && umbenennen[basisKey_(a.key)];
+      if (v && a.titel === v.rohTitel) shU.getRange(a._row, spT).setValue(v.titel);
+    });
+  }
   const alle = lesen_('Aufgaben');
   const neu = planeAufgaben_(vorlagen, alle.map(function (a) { return a.key; }), heute);
   einfuegen_('Aufgaben', neu.map(function (n) {
@@ -759,6 +788,8 @@ function profilPrompt_(k) {
     'Winterschutz-Aufgaben NUR, wenn die Pflanze in dieser Region und Haltung ohne Schutz tatsächlich Schaden nehmen würde: frostempfindliche Arten, Topfpflanzen mit Gefahr eines durchfrierenden Wurzelballens, oder junge Pflanzen in den ersten 1–2 Wintern nach der Pflanzung. ' +
     'Eingewachsene, in Deutschland winterharte Gartenpflanzen bekommen KEINE Winterschutz-Aufgabe – dann im Feld "winter" kurz „kein Schutz nötig“. ' +
     'Ist Winterschutz nur wegen des jungen Alters nötig, setze bei dieser Aufgabe "nurJung": true (sonst false). ' +
+    'Verwende für Winterschutz-Aufgaben als "titel" ausschließlich diese Bezeichnungen: „Ins Winterquartier räumen“, „Aus dem Winterquartier räumen“, „Kübel einpacken“, „Krone mit Vlies schützen“, „Wurzelbereich abdecken“ (mit Laub, Reisig oder Stroh), „Anhäufeln“, „Winterschutz entfernen“; nur wenn keine davon passt, „Winterschutz anbringen“. ' +
+    'Mehrere Maßnahmen zum selben Zeitpunkt als eigene Aufgaben; Material und Vorgehen gehören in "hinweis". ' +
     'Hat der Besitzer sein Vorgehen beschrieben, plane genau dieses Vorgehen ein (mit passenden Zeitfenstern) statt allgemeiner Empfehlungen. ' +
     'Keine Gießaufgaben. Höchstens 8 Aufgaben. "material" nur, wenn etwas gekauft werden muss (z. B. "Rosendünger").';
 }
