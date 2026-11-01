@@ -4,7 +4,7 @@
  * KI: Claude API (Schlüssel in den Skripteigenschaften).
  * Wetter: Open-Meteo (kostenlos, ohne Schlüssel).
  */
-const VERSION = '1.0.14';
+const VERSION = '1.0.15';
 const TZ = 'Europe/Berlin';
 
 const TABELLEN = {
@@ -401,14 +401,15 @@ function basisKey_(key) { return String(key || '').split('|').slice(0, 3).join('
 function istJung_(p, heute) {
   return !!(p.pflanzdatum && diffTage_(String(p.pflanzdatum).slice(0, 10), heute) < 550);
 }
-/** Winterschutz ist bei eingewachsenen, ausgepflanzten und sicher winterharten Pflanzen unnötig. */
+/** Winterschutz ist bei eingewachsenen, ausgepflanzten Pflanzen, die bis -10 °C winterhart sind, unnötig.
+ *  Bei strengerem Frost warnt die Frostwarnung gezielt (berechneHinweise_). */
 function winterschutzUnnoetig_(a, p, prof, heute) {
   if (a.kategorie !== 'Winterschutz') return false;
   if (/winterquartier|ausräumen|ausraeumen|einräumen|einraeumen/i.test(String(a.titel || ''))) return false;
   if (a.nurJung && !istJung_(p, heute)) return true;
   if (p.haltung === 'Topf' || istJung_(p, heute)) return false;
   const g = (prof.frostgrenzeEigen !== undefined && prof.frostgrenzeEigen !== null && prof.frostgrenzeEigen !== '') ? Number(prof.frostgrenzeEigen) : Number(prof.frostgrenze);
-  return !isNaN(g) && prof.frostgrenze !== null && g <= -15;
+  return !isNaN(g) && prof.frostgrenze !== null && g <= -10;
 }
 
 function vorlagen_() {
@@ -1140,16 +1141,18 @@ function berechneHinweise_(fl, pf, tage, s, heute, aufgaben, hatKreise) {
         g = Number(g) + (topf && !eigen ? 5 : 0); // Wurzeln im Topf frieren früher (eigene Angabe gilt so, wie die Pflanze steht)
         if (kalt.min > g + 1) return;
         let m;
+        const schutz = /kein/i.test(String(x.prof.winterschutz || '')) ? '' : x.prof.winterschutz;
         if (topf && x.p.winterFlaecheId && !x.imWinter) m = 'Ins Winterquartier (' + ((flM[x.p.winterFlaecheId] || {}).name || '') + ') räumen';
-        else if (topf) m = x.prof.winterschutz || 'Topf einpacken und geschützt stellen';
-        else m = x.prof.winterschutz || 'Mit Vlies abdecken';
+        else if (topf) m = schutz || 'Topf einpacken und geschützt stellen';
+        else m = schutz || 'Mit Vlies abdecken';
         betr.push({ id: x.p.id, name: x.p.name, flaeche: x.f.name, massnahme: m });
       });
       const bew = (aufgaben || []).find(function (a) { return a.status === 'offen' && a.bezugId === 'bewaesserung' && a.key.indexOf('|bew-winter|') > 0; });
       if (hatKreise && bew) betr.push({ id: '', name: 'Bewässerung', flaeche: '', massnahme: 'Leitungen entleeren, Steuergerät reinholen' });
       if (betr.length) {
         out.push({ typ: 'frost', titel: 'Frost bis ' + String(kalt.min).replace('.', ',') + ' °C (' + wochentag_(kalt.datum) + ')',
-          datum: kalt.datum, min: kalt.min, text: '', pflanzen: betr });
+          datum: kalt.datum, min: kalt.min, pflanzen: betr,
+          text: kalt.min <= -10 ? 'Strenger Frost: Auch Pflanzen, die sonst ohne Winterschutz auskommen, brauchen jetzt Schutz.' : '' });
       }
     }
     // ---- Trockenheit (nur nicht bewässerte Pflanzen draußen)
