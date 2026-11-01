@@ -224,11 +224,32 @@ function index(){
   d.pflanzen.sort((a,b)=> a.name.localeCompare(b.name,'de'));
 }
 
+/* Zwischenspeicher: Beim Start sofort die zuletzt geladenen Daten zeigen, frische Daten kommen im Hintergrund. */
+const CACHE_KEY = 'gj_daten_v1';
+function cacheLesen(){ try { const s = localStorage.getItem(CACHE_KEY); return s ? JSON.parse(s) : null; } catch(e){ return null; } }
+function cacheSchreiben(d){
+  try { localStorage.setItem(CACHE_KEY, JSON.stringify(d)); }
+  catch(e){ // zu groß: ohne Vorschaubilder speichern
+    try { const k = Object.assign({}, d, { pflanzen: d.pflanzen.map(p=>Object.assign({}, p, {thumb:''})) }); localStorage.setItem(CACHE_KEY, JSON.stringify(k)); } catch(e2){}
+  }
+}
+function datenOhneAbgeleitetes(d){ return Object.assign({}, d, { pflanzen: d.pflanzen.map(p=>{ const o = Object.assign({}, p); delete o.prof; return o; }) }); }
+let abgleichLaeuft = false;
 async function neuLaden(still){
+  const start = !S.d;
+  if(start){
+    const c = cacheLesen();
+    if(c && c.pflanzen){ S.d = c; S.d.ausCache = true; index(); render(); fertig(); still = true; }
+  }
   try {
     if(!still) laden('Lade Garten …');
-    S.d = await api('ladeAlles');
-    index(); render(); fertig();
+    const d = await api('ladeAlles');
+    S.d = d; index(); render(); fertig();
+    cacheSchreiben(datenOhneAbgeleitetes(d));
+    if(d.syncNoetig && !abgleichLaeuft){
+      abgleichLaeuft = true;
+      api('abgleich').then(neu => { abgleichLaeuft = false; if(neu) neuLaden(true); }).catch(()=>{ abgleichLaeuft = false; });
+    }
   } catch(e){ fehler(e); if(!S.d) $('inhalt').innerHTML = '<div class="leer">'+esc(e.message||e)+'</div>'; }
 }
 

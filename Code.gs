@@ -4,7 +4,7 @@
  * KI: Claude API (Schlüssel in den Skripteigenschaften).
  * Wetter: Open-Meteo (kostenlos, ohne Schlüssel).
  */
-const VERSION = '1.0.20';
+const VERSION = '1.0.21';
 const TZ = 'Europe/Berlin';
 
 const TABELLEN = {
@@ -113,13 +113,13 @@ function setup() {
   if (ordnerId) { try { ordner = DriveApp.getFolderById(ordnerId); } catch (e) { ordner = null; } }
   if (!ordner) {
     ordner = DriveApp.createFolder('Gartenjahr');
-    props.setProperty('FOLDER_ID', ordner.getId());
+    setProp_('FOLDER_ID', ordner.getId());
   }
   ['FOTOS', 'PLAN'].forEach(function (n) {
     let ok = false;
     const id = props.getProperty('FOLDER_' + n);
     if (id) { try { DriveApp.getFolderById(id); ok = true; } catch (e) { ok = false; } }
-    if (!ok) props.setProperty('FOLDER_' + n, ordner.createFolder(n === 'FOTOS' ? 'Fotos' : 'Plan').getId());
+    if (!ok) setProp_('FOLDER_' + n, ordner.createFolder(n === 'FOTOS' ? 'Fotos' : 'Plan').getId());
   });
 
   let ss = null;
@@ -128,7 +128,7 @@ function setup() {
   if (!ss) {
     ss = SpreadsheetApp.create('Gartenjahr – Daten');
     DriveApp.getFileById(ss.getId()).moveTo(ordner);
-    props.setProperty('SS_ID', ss.getId());
+    setProp_('SS_ID', ss.getId());
   }
   Object.keys(TABELLEN).forEach(function (name) {
     let sh = ss.getSheetByName(name);
@@ -145,7 +145,7 @@ function setup() {
   const s = einstellungen_();
   if (!s.mailAn) {
     s.mailAn = Session.getEffectiveUser().getEmail();
-    PropertiesService.getScriptProperties().setProperty('SETTINGS', JSON.stringify(s));
+    setProp_('SETTINGS', JSON.stringify(s));
   }
   trigger_(bool_(s.mailAktiv));
   Logger.log('Fertig. Daten liegen hier: ' + ss.getUrl());
@@ -162,7 +162,17 @@ function trigger_(aktiv) {
  * Daten-Grundfunktionen
  * ============================================================ */
 let _ss = null;
-function prop_(k) { return PropertiesService.getScriptProperties().getProperty(k); }
+// Skript-Eigenschaften einmal pro Aufruf lesen (spart viele langsame Einzelzugriffe)
+let _props = null;
+function prop_(k) {
+  if (!_props) _props = PropertiesService.getScriptProperties().getProperties();
+  return _props[k] === undefined ? null : _props[k];
+}
+function setProp_(k, v) {
+  const p = PropertiesService.getScriptProperties();
+  if (v === null || v === undefined) { p.deleteProperty(k); if (_props) delete _props[k]; }
+  else { p.setProperty(k, String(v)); if (_props) _props[k] = String(v); }
+}
 function pruefeSetup_() {
   if (!prop_('SS_ID')) throw new Error('Die App ist noch nicht eingerichtet. Bitte im Skript-Editor einmal die Funktion „setup“ ausführen.');
 }
@@ -319,7 +329,7 @@ function speichereEinstellungen(neu) {
     });
     ['maehroboter', 'mailAktiv'].forEach(function (k) { if (neu[k] !== undefined) s[k] = bool_(neu[k]); });
     if (!s.modell) s.modell = STANDARD.modell;
-    PropertiesService.getScriptProperties().setProperty('SETTINGS', JSON.stringify(s));
+    setProp_('SETTINGS', JSON.stringify(s));
     if (bool_(s.mailAktiv) !== vorherMail) trigger_(bool_(s.mailAktiv));
     if ([bool_(s.maehroboter), s.robotStart, s.robotEnde].join('|') !== vorherRobot) {
       // offene, noch nicht begonnene Mähroboter-Aufgaben neu planen
@@ -334,9 +344,9 @@ function speichereEinstellungen(neu) {
 
 function speichereSchluessel(key) {
   key = String(key || '').trim();
-  if (!key) { PropertiesService.getScriptProperties().deleteProperty('CLAUDE_API_KEY'); return false; }
+  if (!key) { setProp_('CLAUDE_API_KEY', null); return false; }
   if (key.indexOf('sk-ant-') !== 0) throw new Error('Das sieht nicht wie ein Claude-API-Schlüssel aus (beginnt mit „sk-ant-“).');
-  PropertiesService.getScriptProperties().setProperty('CLAUDE_API_KEY', key);
+  setProp_('CLAUDE_API_KEY', key);
   return true;
 }
 
@@ -369,22 +379,30 @@ function steckbriefeReparieren_() {
 /* ============================================================
  * Laden
  * ============================================================ */
+/** Muss der Aufgabenplan neu abgeglichen werden? (dauert etwas – läuft im Hintergrund über abgleich()) */
+function syncNoetig_() {
+  return Date.now() - Number(prop_('LAST_SYNC') || 0) > 6 * 3600 * 1000 || prop_('SYNC_VERSION') !== VERSION;
+}
+/** Abgleich im Hintergrund: Aufgaben neu planen, nach einem Update Steckbriefe reparieren. */
+function abgleich() {
+  pruefeSetup_();
+  if (!syncNoetig_()) return false;
+  if (prop_('SYNC_VERSION') !== VERSION) mitSperre_(steckbriefeReparieren_);
+  mitSperre_(syncAufgaben_);
+  setProp_('SYNC_VERSION', VERSION);
+  return true;
+}
+
 function ladeAlles() {
   pruefeSetup_();
-  const letzter = Number(prop_('LAST_SYNC') || 0);
-  if (Date.now() - letzter > 6 * 3600 * 1000 || prop_('SYNC_VERSION') !== VERSION) {
-    if (prop_('SYNC_VERSION') !== VERSION) mitSperre_(steckbriefeReparieren_);
-    mitSperre_(syncAufgaben_);
-    PropertiesService.getScriptProperties().setProperty('SYNC_VERSION', VERSION);
-  }
   const heute = heute_();
   const grenze = addTage_(heute, -60);
-  const fl = lesen_('Flaechen'), pf = lesen_('Pflanzen');
-  const au = lesen_('Aufgaben').filter(function (a) {
+  const fl = lesen_('Flaechen'), pf = lesen_('Pflanzen'), alleAufgaben = lesen_('Aufgaben'), kr = lesen_('Kreise');
+  const au = alleAufgaben.filter(function (a) {
     return a.status === 'offen' || (a.erledigtAm || '') >= grenze;
   });
   let hinweise = [];
-  try { hinweise = hinweise_(fl, pf); } catch (e) {
+  try { hinweise = berechneHinweise_(fl, pf, wetter_(), einstellungen_(), heute, alleAufgaben, kr.length > 0); } catch (e) {
     hinweise = [{ typ: 'info', titel: 'Wetter gerade nicht verfügbar', text: String(e.message || e), pflanzen: [] }];
   }
   return {
@@ -392,13 +410,14 @@ function ladeAlles() {
     heute: heute,
     flaechen: fl.map(sauber_),
     pflanzen: pf.map(sauber_),
-    kreise: lesen_('Kreise').map(sauber_),
+    kreise: kr.map(sauber_),
+    syncNoetig: syncNoetig_(),
     aufgaben: au.map(sauber_),
     einkauf: lesen_('Einkauf').map(sauber_),
     einstellungen: oeffentlich_(einstellungen_()),
     hinweise: hinweise,
     ausgeblendet: (function (o) { return Object.keys(o).map(function (k) { return Object.assign({ key: k }, o[k]); }); })(ausgeblendet_()),
-    links: { tabelle: ss_().getUrl(), ordner: 'https://drive.google.com/drive/folders/' + prop_('FOLDER_ID') }
+    links: { tabelle: 'https://docs.google.com/spreadsheets/d/' + prop_('SS_ID') + '/edit', ordner: 'https://drive.google.com/drive/folders/' + prop_('FOLDER_ID') }
   };
 }
 
@@ -407,7 +426,7 @@ function ladeAlles() {
  * ============================================================ */
 /** Vorlagen, die nicht mehr geplant werden sollen: { "quelle|bezugId|vkey": { titel, kategorie, bezugId, datum } } */
 function ausgeblendet_() { return parse_(prop_('AUSGEBLENDET')) || {}; }
-function ausgeblendetSpeichern_(o) { PropertiesService.getScriptProperties().setProperty('AUSGEBLENDET', JSON.stringify(o)); }
+function ausgeblendetSpeichern_(o) { setProp_('AUSGEBLENDET', JSON.stringify(o)); }
 function basisKey_(key) { return String(key || '').split('|').slice(0, 3).join('|'); }
 
 /** Ist die Pflanze noch jung (Pflanzdatum innerhalb der letzten 18 Monate)? Ohne Datum gilt sie als eingewachsen. */
@@ -502,7 +521,7 @@ function syncAufgaben_() {
       sh.getRange(a._row, spErl).setNumberFormat('@').setValue(heute);
     }
   });
-  PropertiesService.getScriptProperties().setProperty('LAST_SYNC', String(Date.now()));
+  setProp_('LAST_SYNC', String(Date.now()));
   return neu.length;
 }
 
@@ -1283,7 +1302,7 @@ function speicherePlanBild(bild) {
     const f = DriveApp.getFolderById(prop_('FOLDER_PLAN')).createFile(
       Utilities.newBlob(Utilities.base64Decode(b64_(bild)), 'image/jpeg', 'Gartenplan ' + heute_() + '.jpg'));
     s.planFileId = f.getId();
-    PropertiesService.getScriptProperties().setProperty('SETTINGS', JSON.stringify(s));
+    setProp_('SETTINGS', JSON.stringify(s));
     return true;
   });
 }
@@ -1359,13 +1378,13 @@ function taeglich() {
 
   const frost = h.find(function (x) { return x.typ === 'frost'; });
   if (frost && props.getProperty('MAIL_FROST') !== frost.datum) {
-    teile.push(hinweisHtml_(frost)); props.setProperty('MAIL_FROST', frost.datum);
+    teile.push(hinweisHtml_(frost)); setProp_('MAIL_FROST', frost.datum);
     betreff = 'Frostwarnung';
   }
   const tr = h.find(function (x) { return x.typ === 'trocken'; });
   const lastTr = props.getProperty('MAIL_TROCKEN') || '';
   if (tr && (!lastTr || diffTage_(lastTr, heute) >= 5)) {
-    teile.push(hinweisHtml_(tr)); props.setProperty('MAIL_TROCKEN', heute);
+    teile.push(hinweisHtml_(tr)); setProp_('MAIL_TROCKEN', heute);
     betreff = betreff || 'Trockenheit – bitte gießen';
   }
 
