@@ -338,6 +338,63 @@ function aufgabeZeile(a){
     '<div class="mitte" onclick="aufgabeDetail(\''+a.id+'\')"><div class="titel">'+(KAT[a.kategorie]||'📌')+' '+esc(a.titel)+'</div>'+
     '<div class="sub ellipse">'+esc(bezugText(a))+(bezugText(a)?' · ':'')+zeit+(a.material?' · 🛒':'')+'</div></div></div>';
 }
+/* ---- Gleiche Maßnahmen mit überlappendem Zeitraum zusammenfassen ---- */
+// Bei diesen Kategorien zählt die Kategorie als „gleiche Maßnahme“, sonst muss der Titel gleich sein.
+const GRUPPE_NACH_KAT = ['Schnitt','Düngen','Winterschutz','Umtopfen'];
+function gruppenKey(a){
+  if(!S.pfM[a.bezugId]) return null; // nur Pflanzenaufgaben (Rasen, Technik bleiben einzeln)
+  return GRUPPE_NACH_KAT.includes(a.kategorie) ? 'k|'+a.kategorie : 't|'+a.kategorie+'|'+String(a.titel||'').toLowerCase().replace(/\s+/g,' ').trim();
+}
+function spanne(von, bis){ return diffTage(von, bis) + 1; }
+/** Liefert Gruppen {key, liste, von, bis}; von/bis = gemeinsamer Zeitraum. Überlappung mind. 50 % des kürzeren Zeitraums. */
+function zusammenfassen(liste){
+  const gruppen = [];
+  liste.slice().sort((a,b)=>a.von<b.von?-1:a.von>b.von?1:0).forEach(a=>{
+    const k = gruppenKey(a);
+    const g = k && gruppen.find(g=>{
+      if(g.key!==k) return false;
+      const v = a.von>g.von?a.von:g.von, b = a.bis<g.bis?a.bis:g.bis;
+      return b>=v && spanne(v,b) >= 0.5*Math.min(spanne(a.von,a.bis), spanne(g.von,g.bis));
+    });
+    if(g){ g.liste.push(a); if(a.von>g.von) g.von=a.von; if(a.bis<g.bis) g.bis=a.bis; }
+    else gruppen.push({key:k||('e|'+a.id), liste:[a], von:a.von, bis:a.bis});
+  });
+  return gruppen;
+}
+function gruppeTitel(g){
+  const a = g.liste[0];
+  const gleich = g.liste.every(x=>x.titel===a.titel);
+  return (gleich ? a.titel : a.kategorie)+' · '+g.liste.length+' Pflanzen';
+}
+function gruppeZeile(g){
+  if(g.liste.length===1) return aufgabeZeile(g.liste[0]);
+  const h = heute(), i = S.gruppen.push(g)-1;
+  const ueber = g.bis < h;
+  const zeit = ueber ? '<b>überfällig seit '+fd(g.bis)+'</b>' : g.von > h ? fd(g.von)+' – '+fd(g.bis) : 'bis '+fd(g.bis);
+  const namen = g.liste.map(a=>(S.pfM[a.bezugId]||{}).name||'').join(', ');
+  return '<div class="zeile'+(ueber?' ueber':'')+'">'+
+    '<button class="chk" onclick="event.stopPropagation();gruppeErledigt('+i+')"></button>'+
+    '<div class="mitte" onclick="gruppeDetail('+i+')"><div class="titel">'+(KAT[g.liste[0].kategorie]||'📌')+' '+esc(gruppeTitel(g))+'</div>'+
+    '<div class="sub ellipse">'+esc(namen)+' · '+zeit+(g.liste.some(a=>a.material)?' · 🛒':'')+'</div></div><span>›</span></div>';
+}
+function gruppeDetail(i){
+  const g = S.gruppen[i]; if(!g) return;
+  const mat = [...new Set(g.liste.map(a=>a.material).filter(Boolean))];
+  sheet((KAT[g.liste[0].kategorie]||'')+' '+esc(gruppeTitel(g)),
+    '<div class="abschnitt"><h4>📅 Gemeinsamer Zeitraum</h4><p>'+fdLang(g.von)+(g.bis!==g.von?' bis '+fdLang(g.bis):'')+'</p></div>'+
+    (mat.length?'<div class="abschnitt"><h4>🛒 Material</h4><p>'+mat.map(m=>'• '+esc(m)).join('\n')+'</p></div>':'')+
+    '<div class="abschnitt"><h4>🌿 Pflanzen</h4><p class="klein">Antippen für Details und Anleitung zur jeweiligen Pflanze.</p><div class="karte">'+g.liste.map(aufgabeZeile).join('')+'</div></div>'+
+    '<button class="knopf voll" style="margin-top:16px" onclick="gruppeErledigt('+i+')">✓ Alle erledigt</button>');
+}
+async function gruppeErledigt(i){
+  const g = S.gruppen[i]; if(!g) return;
+  const ids = g.liste.filter(a=>a.status==='offen').map(a=>a.id);
+  g.liste.forEach(a=>{ a.status='erledigt'; a.erledigtAm=heute(); });
+  if(!$('sheet').classList.contains('zu')) sheetZu();
+  render();
+  try { await api('aufgabenErledigt', ids); toast(ids.length+' Aufgaben erledigt ✓'); }
+  catch(e){ fehler(e); neuLaden(true); }
+}
 function hinweisHtml(h){
   const ic = {frost:'❄️', trocken:'☀️', giessen:'💧', info:'ℹ️'}[h.typ] || 'ℹ️';
   return '<div class="hinweis h-'+h.typ+'"><div class="titel">'+ic+' '+esc(h.titel)+'</div>'+
@@ -361,7 +418,8 @@ function willkommenHtml(){
 function renderAufgaben(){
   const h = heute();
   const alle = S.d.aufgaben.filter(a => katPasst(a) && (!S.flFilter || aufgabeFlaeche(a)===S.flFilter));
-  const offen = alle.filter(a=>a.status==='offen').sort((a,b)=> a.bis<b.bis?-1:a.bis>b.bis?1:a.titel.localeCompare(b.titel,'de'));
+  S.gruppen = [];
+  const offen = zusammenfassen(alle.filter(a=>a.status==='offen')).sort((a,b)=> a.bis<b.bis?-1:a.bis>b.bis?1:a.liste[0].titel.localeCompare(b.liste[0].titel,'de'));
   const ueber = offen.filter(a=>a.bis<h);
   const jetzt = offen.filter(a=>a.von<=h && a.bis>=h);
   const bald = offen.filter(a=>a.von>h && a.von<=addTage(h,28)).sort((a,b)=>a.von<b.von?-1:1);
@@ -372,8 +430,9 @@ function renderAufgaben(){
   html += '<div class="chips" style="margin-top:14px">'+['Alle','Schnitt','Düngen','Rasen','Winter','Technik','Weitere'].map(k=>'<button class="chip'+(S.katFilter===k?' an':'')+'" onclick="S.katFilter=\''+k+'\';render()">'+k+'</button>').join('')+'</div>';
   html += '<select class="suche" style="margin-top:6px" onchange="S.flFilter=this.value;render()">'+flOptionen(S.flFilter, null, 'Alle Flächen')+'</select>';
 
-  const block = (titel, liste, extra) => liste.length ? '<h2>'+titel+' <span class="sub">'+liste.length+'</span>'+(extra||'')+'</h2><div class="karte">'+liste.map(aufgabeZeile).join('')+'</div>' : '';
-  const alleHaken = (S.katFilter!=='Alle'||S.flFilter) && (jetzt.length+ueber.length)>1 ? '<span class="rechts"><button class="knopf klein zwei" onclick="alleErledigt()">Alle ✓</button></span>' : '';
+  const anz = l => l.reduce((n,g)=>n+g.liste.length,0);
+  const block = (titel, liste, extra) => liste.length ? '<h2>'+titel+' <span class="sub">'+anz(liste)+'</span>'+(extra||'')+'</h2><div class="karte">'+liste.map(gruppeZeile).join('')+'</div>' : '';
+  const alleHaken = (S.katFilter!=='Alle'||S.flFilter) && (anz(jetzt)+anz(ueber))>1 ? '<span class="rechts"><button class="knopf klein zwei" onclick="alleErledigt()">Alle ✓</button></span>' : '';
   html += block('Überfällig', ueber);
   html += block('Jetzt dran', jetzt, ueber.length?'':alleHaken);
   if(!ueber.length && !jetzt.length) html += '<h2>Jetzt dran</h2><div class="karte"><div class="leer">Gerade ist nichts fällig. 🌿</div></div>';
@@ -382,7 +441,7 @@ function renderAufgaben(){
     const proMonat = {};
     spaeter.forEach(a=>{ const k=a.von.slice(0,7); (proMonat[k]=proMonat[k]||[]).push(a); });
     html += '<h2>Später</h2>';
-    html += Object.keys(proMonat).sort().map(k=>'<div class="sub" style="margin:10px 4px 4px;font-weight:600">'+MONATE[Number(k.slice(5,7))-1]+' '+k.slice(0,4)+'</div><div class="karte">'+proMonat[k].map(aufgabeZeile).join('')+'</div>').join('');
+    html += Object.keys(proMonat).sort().map(k=>'<div class="sub" style="margin:10px 4px 4px;font-weight:600">'+MONATE[Number(k.slice(5,7))-1]+' '+k.slice(0,4)+'</div><div class="karte">'+proMonat[k].map(gruppeZeile).join('')+'</div>').join('');
   }
   if(erl.length){
     html += '<h2 style="cursor:pointer" onclick="S.offenErledigt=!S.offenErledigt;render()">Zuletzt erledigt <span class="sub">'+erl.length+'</span><span class="rechts">'+(S.offenErledigt?'▲':'▼')+'</span></h2>';
