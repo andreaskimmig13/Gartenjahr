@@ -4,7 +4,7 @@
  * KI: Claude API (Schlüssel in den Skripteigenschaften).
  * Wetter: Open-Meteo (kostenlos, ohne Schlüssel).
  */
-const VERSION = '1.0.22';
+const VERSION = '1.0.23';
 const TZ = 'Europe/Berlin';
 
 const TABELLEN = {
@@ -295,6 +295,23 @@ function wochentag_(iso) {
   return ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'][new Date(iso + 'T12:00:00Z').getUTCDay()] + ' ' +
     iso.slice(8, 10) + '.' + iso.slice(5, 7) + '.';
 }
+/** Für wiederkehrende Aufgaben (Schlüssel mit #): Abstand in Tagen und Ende der Serie, sonst null. */
+function serie_(a, pfM) {
+  if (a.status !== 'offen' || !a.key || a.key.indexOf('#') < 0) return null;
+  const t = a.key.split('|');
+  if (t[0] !== 'pflanze' || !pfM[t[1]]) return null;
+  const prof = profil_(pfM[t[1]].profil);
+  if (!prof || !Array.isArray(prof.aufgaben)) return null;
+  const v = prof.aufgaben.find(function (x) { return x && slug_((x.kategorie || '') + '-' + x.titel) === t[2]; });
+  if (!v) return null;
+  let iv = Math.round(Number(v.intervallTage) || 0);
+  if (iv < 14) return null;
+  if (iv < 21) iv = 21;
+  const von0 = normMD_(v.von), bis0 = normMD_(v.bis), j = Number(String(t[3]).split('#')[0]);
+  if (!von0 || !bis0 || !j) return null;
+  return { tage: iv, bis: datumAus_(bis0 < von0 ? j + 1 : j, bis0) };
+}
+
 function slug_(s) {
   return String(s || '').toLowerCase().replace(/ä/g, 'ae').replace(/ö/g, 'oe').replace(/ü/g, 'ue').replace(/ß/g, 'ss')
     .replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40);
@@ -412,7 +429,10 @@ function ladeAlles() {
     pflanzen: pf.map(sauber_),
     kreise: kr.map(sauber_),
     syncNoetig: syncNoetig_(),
-    aufgaben: au.map(sauber_),
+    aufgaben: (function () {
+      const pfM = map_(pf);
+      return au.map(function (a) { const o = sauber_(a); const w = serie_(a, pfM); if (w) o.wdh = w; return o; });
+    })(),
     einkauf: lesen_('Einkauf').map(sauber_),
     einstellungen: oeffentlich_(einstellungen_()),
     hinweise: hinweise,

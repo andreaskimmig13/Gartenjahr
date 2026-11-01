@@ -347,6 +347,11 @@ function segWert(name){ const b=document.querySelector('[data-seg="'+name+'"] bu
 function feld(id){ const e=$(id); return e ? e.value.trim() : ''; }
 
 /* ================= Aufgaben ================= */
+function wdhText(a){
+  if(!a.wdh) return '';
+  const t = a.wdh.tage, w = t%7===0 ? (t===7?'jede Woche':'alle '+(t/7)+' Wochen') : 'alle '+t+' Tage';
+  return '↻ '+w+' bis '+fd(a.wdh.bis);
+}
 function aufgabeZeile(a){
   const h = heute();
   const ueber = a.status==='offen' && a.bis < h;
@@ -359,7 +364,8 @@ function aufgabeZeile(a){
   return '<div class="zeile'+(ueber?' ueber':'')+(erl?' erl':'')+'">'+
     '<button class="chk'+(erl?' an':'')+'" onclick="event.stopPropagation();aufgabeHaken(\''+a.id+'\')">'+(erl?'✓':'')+'</button>'+
     '<div class="mitte" onclick="aufgabeDetail(\''+a.id+'\')"><div class="titel">'+(KAT[a.kategorie]||'📌')+' '+esc(a.titel)+'</div>'+
-    '<div class="sub ellipse">'+esc(bezugText(a))+(bezugText(a)?' · ':'')+zeit+(a.material?' · 🛒':'')+'</div></div></div>';
+    '<div class="sub ellipse">'+esc(bezugText(a))+(bezugText(a)?' · ':'')+zeit+(a.material?' · 🛒':'')+'</div>'+
+    (a.wdh && !erl ? '<div class="sub">'+wdhText(a)+'</div>' : '')+'</div></div>';
 }
 /* ---- Gleiche Maßnahmen mit überlappendem Zeitraum zusammenfassen ---- */
 // Bei diesen Kategorien zählt die Kategorie als „gleiche Maßnahme“, sonst muss der Titel gleich sein.
@@ -494,7 +500,8 @@ function aufgabeDetail(id){
   const p = S.pfM[a.bezugId], f = S.flM[a.bezugId];
   const imEinkauf = S.d.einkauf.some(e=>e.aufgabeId===a.id && e.status==='offen');
   let html = '<div class="sub">'+(KAT[a.kategorie]||'')+' '+esc(a.kategorie)+(bezugText(a)?' · '+esc(bezugText(a)):'')+'</div>'+
-    '<div class="abschnitt"><h4>📅 Zeitraum</h4><p>'+fdLang(a.von)+(a.bis!==a.von?' bis '+fdLang(a.bis):'')+'</p></div>'+
+    '<div class="abschnitt"><h4>📅 Zeitraum</h4><p>'+fdLang(a.von)+(a.bis!==a.von?' bis '+fdLang(a.bis):'')+'</p>'+
+      (a.wdh?'<p class="sub">'+wdhText(a)+' – der nächste Termin erscheint automatisch etwa 10 Tage vorher, unabhängig vom Abhaken.</p>':'')+'</div>'+
     (a.hinweis?'<div class="abschnitt"><h4>💡 So geht’s</h4><p>'+esc(a.hinweis)+'</p></div>':'')+
     (a.material?'<div class="abschnitt"><h4>🛒 Material</h4><p>'+esc(a.material)+'</p>'+(imEinkauf?'<div class="sub">steht auf der Einkaufsliste</div>':'<button class="knopf klein zwei" style="margin-top:6px" onclick="aufEinkauf(\''+a.id+'\')">Auf die Einkaufsliste</button>')+'</div>':'');
   if(p) html += '<div class="abschnitt"><button class="knopf zwei voll" onclick="pflanzeDetail(\''+p.id+'\')">🌿 Zur Pflanze: '+esc(p.name)+'</button></div>';
