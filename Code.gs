@@ -4,7 +4,7 @@
  * KI: Claude API (Schlüssel in den Skripteigenschaften).
  * Wetter: Open-Meteo (kostenlos, ohne Schlüssel).
  */
-const VERSION = '1.0.23';
+const VERSION = '1.0.24';
 const TZ = 'Europe/Berlin';
 
 const TABELLEN = {
@@ -155,7 +155,8 @@ function trigger_(aktiv) {
   ScriptApp.getProjectTriggers().forEach(function (t) {
     if (t.getHandlerFunction() === 'taeglich') ScriptApp.deleteTrigger(t);
   });
-  if (aktiv) ScriptApp.newTrigger('taeglich').timeBased().everyDays(1).atHour(7).inTimezone(TZ).create();
+  // Abends um 18 Uhr: Frost für die kommende Nacht, Trockenheit, freitags Wochenrückblick und -ausblick
+  if (aktiv) ScriptApp.newTrigger('taeglich').timeBased().everyDays(1).atHour(18).inTimezone(TZ).create();
 }
 
 /* ============================================================
@@ -404,7 +405,12 @@ function syncNoetig_() {
 function abgleich() {
   pruefeSetup_();
   if (!syncNoetig_()) return false;
-  if (prop_('SYNC_VERSION') !== VERSION) mitSperre_(steckbriefeReparieren_);
+  if (prop_('SYNC_VERSION') !== VERSION) {
+    mitSperre_(steckbriefeReparieren_);
+    if (prop_('TRIGGER_VERSION') !== '18h') { // Erinnerungszeit auf abends umstellen
+      try { trigger_(bool_(einstellungen_().mailAktiv)); setProp_('TRIGGER_VERSION', '18h'); } catch (e) { /* beim nächsten Mal */ }
+    }
+  }
   mitSperre_(syncAufgaben_);
   setProp_('SYNC_VERSION', VERSION);
   return true;
@@ -1413,25 +1419,30 @@ function taeglich() {
     betreff = betreff || 'Trockenheit – bitte gießen';
   }
 
-  const montag = Utilities.formatDate(new Date(), TZ, 'u') === '1';
-  if (montag) {
+  const freitag = Utilities.formatDate(new Date(), TZ, 'u') === '5';
+  if (freitag) {
     const flM = map_(fl), pfM = map_(pf);
-    const bis = addTage_(heute, 7);
-    const offen = lesen_('Aufgaben').filter(function (a) { return a.status === 'offen' && a.von <= bis; })
+    const bis = addTage_(heute, 7), seit = addTage_(heute, -6);
+    const alle = lesen_('Aufgaben');
+    const erledigt = alle.filter(function (a) { return a.status === 'erledigt' && (a.erledigtAm || '') >= seit; })
+      .sort(function (a, b) { return a.erledigtAm < b.erledigtAm ? -1 : 1; });
+    const offen = alle.filter(function (a) { return a.status === 'offen' && a.von <= bis; })
       .sort(function (a, b) { return a.bis < b.bis ? -1 : 1; });
     const ue = offen.filter(function (a) { return a.bis < heute; });
     const jetzt = offen.filter(function (a) { return a.bis >= heute; });
-    let html = '<h3 style="margin:16px 0 6px">Diese Woche</h3>';
+    let html = '<h3 style="margin:16px 0 6px">Ausblick: Wochenende und nächste Woche</h3>';
     if (!offen.length) html += '<p>Keine Gartenarbeiten fällig. 🌿</p>';
     if (ue.length) html += '<p style="color:#b3261e;margin:8px 0 4px"><b>Überfällig</b></p>' + aufgabenListeHtml_(ue, pfM, flM);
     if (jetzt.length) html += aufgabenListeHtml_(jetzt, pfM, flM);
     const g = h.find(function (x) { return x.typ === 'giessen'; });
     if (g) html += hinweisHtml_(g);
+    html += '<h3 style="margin:18px 0 6px">Rückblick: diese Woche erledigt</h3>' +
+      (erledigt.length ? aufgabenListeHtml_(erledigt, pfM, flM, true) : '<p style="color:#777">Nichts abgehakt.</p>');
     teile.push(html);
-    betreff = betreff || (offen.length + ' Gartenarbeit' + (offen.length === 1 ? '' : 'en') + ' diese Woche');
+    betreff = betreff || (offen.length ? offen.length + ' Gartenarbeit' + (offen.length === 1 ? '' : 'en') + ' fürs Wochenende' : 'Wochenrückblick');
   }
   if (!teile.length) return;
-  const url = ScriptApp.getService().getUrl();
+  const url = 'https://andreaskimmig13.github.io/Gartenjahr/'; // Startseite mit Logo, ohne Google-Hinweis
   benachrichtigen_('Gartenjahr: ' + betreff,
     '<div style="font-family:Arial,sans-serif;font-size:14px;color:#1d2a1f;max-width:560px">' + teile.join('') +
     (url ? '<p style="margin-top:18px"><a href="' + url + '" style="background:#2f6b3a;color:#fff;padding:9px 14px;border-radius:8px;text-decoration:none">App öffnen</a></p>' : '') +
@@ -1455,7 +1466,7 @@ function hinweisHtml_(h) {
     }).join('') + '</ul>';
 }
 
-function aufgabenListeHtml_(liste, pfM, flM) {
+function aufgabenListeHtml_(liste, pfM, flM, erledigt) {
   return '<ul style="margin:0;padding-left:18px">' + liste.map(function (a) {
     let bezug = '';
     if (pfM[a.bezugId]) bezug = pfM[a.bezugId].name;
@@ -1463,6 +1474,6 @@ function aufgabenListeHtml_(liste, pfM, flM) {
     else if (a.bezugId === 'maehroboter') bezug = 'Mähroboter';
     else if (a.bezugId === 'bewaesserung') bezug = 'Bewässerung';
     return '<li style="margin-bottom:4px">' + esc_(a.titel) + (bezug ? ' – <i>' + esc_(bezug) + '</i>' : '') +
-      ' <span style="color:#777">(bis ' + a.bis.slice(8, 10) + '.' + a.bis.slice(5, 7) + '.)</span></li>';
+      ' <span style="color:#777">(' + (erledigt ? 'am ' + a.erledigtAm.slice(8, 10) + '.' + a.erledigtAm.slice(5, 7) + '.' : 'bis ' + a.bis.slice(8, 10) + '.' + a.bis.slice(5, 7) + '.') + ')</span></li>';
   }).join('') + '</ul>';
 }
